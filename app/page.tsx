@@ -1,6 +1,17 @@
 "use client";
 import { useState, useRef, useEffect } from "react";
 
+// ── CHANGE 1: Added mythology_card to meta type ──────────────────────────────
+interface MythologyCard {
+  figure: string;
+  source: string;
+  text: string;
+  card_title: string;
+  card_story: string;
+  card_connect: string;
+  teaching: string;
+}
+
 interface Message {
   role: "user" | "bot";
   text: string;
@@ -8,20 +19,33 @@ interface Message {
     intent?: string;
     severity?: string;
     mode?: string;
+    mythology_card?: MythologyCard | null;
   };
   typing?: boolean;
+}
+
+// ── CHANGE 2: Added HistoryEntry type for API call ───────────────────────────
+interface HistoryEntry {
+  role: "user" | "assistant";
+  content: string;
 }
 
 export default function Home() {
   const [messages, setMessages] = useState<Message[]>([
     {
       role: "bot",
-      text: "You don’t have to filter anything here. What’s been on your mind lately?",
+      text: "You don't have to filter anything here. What's been on your mind lately?",
     },
   ]);
 
+  // ── CHANGE 3: Track conversation history for API ─────────────────────────
+  const historyRef = useRef<HistoryEntry[]>([]);
+
   const [inputValue, setInputValue] = useState("");
   const bottomRef = useRef<HTMLDivElement>(null);
+
+  // ── CHANGE 4: Track which mythology cards are expanded ───────────────────
+  const [expandedCards, setExpandedCards] = useState<Record<number, boolean>>({});
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -32,28 +56,56 @@ export default function Home() {
 
     const userMessage = inputValue;
 
+    // 1. Add user message
     setMessages((prev) => [
       ...prev,
       { role: "user", text: userMessage },
     ]);
 
+    // 2. Add loader immediately
+    setMessages((prev) => [
+      ...prev,
+      { role: "bot", text: "", typing: true }
+    ]);
+
     setInputValue("");
 
+    // Optional delay
+    await new Promise((res) => setTimeout(res, 400));
+
     try {
+      // ── CHANGE 5: Send history to API ──────────────────────────────────
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ message: userMessage }),
+        body: JSON.stringify({
+          message: userMessage,
+          history: historyRef.current,
+        }),
       });
 
       const data = await res.json();
 
-      setMessages((prev) => [
-        ...prev,
-        { role: "bot", text: "", meta: data.meta, typing: true },
-      ]);
+      // ── CHANGE 6: Update history after response ─────────────────────
+      historyRef.current = [
+        ...historyRef.current,
+        { role: "user",      content: userMessage   },
+        { role: "assistant", content: data.reply    },
+      ];
+
+      // 3. UPDATE last message (replace loader)
+      setMessages((prev) => {
+        const newMessages = [...prev];
+        newMessages[newMessages.length - 1] = {
+          role: "bot",
+          text: "",
+          meta: data.meta,
+          typing: true
+        };
+        return newMessages;
+      });
 
       let fullText = data.reply;
       let i = 0;
@@ -91,7 +143,7 @@ export default function Home() {
         ...prev,
         {
           role: "bot",
-          text: "Something went wrong. I’m still here — try again.",
+          text: "Something went wrong. I'm still here — try again.",
         },
       ]);
     }
@@ -122,7 +174,7 @@ export default function Home() {
         </div>
 
         <p className="text-sm text-white/60">
-          Speak freely. I’m here to listen.
+          Speak freely. I'm here to listen.
         </p>
 
         <div className="text-[10px] tracking-widest text-white/20 uppercase">
@@ -141,19 +193,89 @@ export default function Home() {
             <div key={idx} className="flex flex-col">
 
               {msg.role === "bot" ? (
-                <div className="bg-white/10 p-4 rounded-2xl text-[15px] leading-relaxed max-w-[85%]">
+                <div className="flex flex-col gap-2 max-w-[85%]">
 
-                  {msg.typing && msg.text === "" && (
-                    <div className="text-white/40 text-sm">
-                      Solace is thinking...
-                    </div>
-                  )}
+                  {/* ── Bot reply bubble (unchanged) ── */}
+                  <div className="bg-white/10 p-4 rounded-2xl text-[15px] leading-relaxed">
 
-                  <div>{msg.text}</div>
+                    {msg.typing && msg.text === "" && (
+                      <div className="flex items-center gap-2 text-white/40 text-sm">
+                        <span>Solace is thinking</span>
+                        <div className="flex gap-1">
+                          <div className="w-1.5 h-1.5 bg-white/40 rounded-full animate-bounce"></div>
+                          <div className="w-1.5 h-1.5 bg-white/40 rounded-full animate-bounce [animation-delay:0.2s]"></div>
+                          <div className="w-1.5 h-1.5 bg-white/40 rounded-full animate-bounce [animation-delay:0.4s]"></div>
+                        </div>
+                      </div>
+                    )}
 
-                  {msg.meta && !msg.typing && (
-                    <div className="mt-2 text-[10px] opacity-50 border-t border-white/10 pt-1">
-                      {msg.meta.intent} · {msg.meta.severity} · {msg.meta.mode}
+                    <div>{msg.text}</div>
+
+                    {msg.meta && !msg.typing && (
+                      <div className="mt-2 text-[10px] opacity-50 border-t border-white/10 pt-1">
+                        {msg.meta.intent} · {msg.meta.severity} · {msg.meta.mode}
+                      </div>
+                    )}
+
+                  </div>
+
+                  {/* ── CHANGE 7: Mythology card rendered below reply bubble ── */}
+                  {/* Only shown after typing is done and card data exists       */}
+                  {!msg.typing && msg.meta?.mythology_card && (
+                    <div className="rounded-2xl border border-purple-500/20 bg-purple-950/40 backdrop-blur-md overflow-hidden">
+
+                      {/* Card header — always visible, tappable */}
+                      <button
+                        onClick={() =>
+                          setExpandedCards((prev) => ({
+                            ...prev,
+                            [idx]: !prev[idx],
+                          }))
+                        }
+                        className="w-full flex items-center justify-between px-4 py-3 text-left group"
+                      >
+                        <div className="flex items-center gap-2">
+                          {/* Lotus / story icon */}
+                          <span className="text-purple-300 text-sm">✦</span>
+                          <span className="text-[12px] text-purple-200/80 tracking-wide">
+                            A story that echoes this
+                          </span>
+                        </div>
+                        <span className="text-purple-300/60 text-xs transition-transform duration-300"
+                          style={{ transform: expandedCards[idx] ? "rotate(180deg)" : "rotate(0deg)" }}>
+                          ▾
+                        </span>
+                      </button>
+
+                      {/* Card body — expands on tap */}
+                      {expandedCards[idx] && (
+                        <div className="px-4 pb-4 space-y-3 border-t border-purple-500/10">
+
+                          {/* Title + source */}
+                          <div className="pt-3">
+                            <p className="text-[13px] font-medium text-purple-100">
+                              {msg.meta.mythology_card.card_title}
+                            </p>
+                            <p className="text-[10px] text-purple-300/50 mt-0.5 tracking-wide">
+                              {msg.meta.mythology_card.text}
+                            </p>
+                          </div>
+
+                          {/* The story */}
+                          <p className="text-[13px] text-white/70 leading-relaxed">
+                            {msg.meta.mythology_card.card_story}
+                          </p>
+
+                          {/* The connection — highlighted */}
+                          <div className="bg-purple-500/10 border border-purple-500/20 rounded-xl px-3 py-2">
+                            <p className="text-[12px] text-purple-200/90 leading-relaxed italic">
+                              {msg.meta.mythology_card.card_connect}
+                            </p>
+                          </div>
+
+                        </div>
+                      )}
+
                     </div>
                   )}
 
