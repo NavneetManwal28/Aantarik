@@ -1,1011 +1,932 @@
+// ═══════════════════════════════════════════════════════════════════════════════
 import OpenAI from "openai";
 
-// ═══════════════════════════════════════════════════════════════════════════════
-//  ANANDA v3 — Thinking Partner Architecture
-//
-//  KEY CHANGES FROM v2:
-//  - System prompt: acknowledge → validate → deepen → 1 strong question (mandatory)
-//  - No rigid word/sentence limits — responses are as long as they need to be
-//  - Intent parsing: JSON.parse only, no regex, clean fallback (safeParseIntent)
-//  - Recurring pattern: counts matching user messages, not keyword frequency
-//  - Severity: L4 ONLY from crisis keyword check — escalation logic capped at L3
-//  - Mythology: random per response, shown unless mode === stabilizing
-//  - Questions: intent-specific question bank — never generic
-//  - Temperature 0.82 for natural variation
-// ═══════════════════════════════════════════════════════════════════════════════
-
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+});
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  SECTION 1 — MYTHOLOGY KNOWLEDGE BASE
-//  Random selection per response. No module-scope counter (safer for serverless).
+//  SECTION 1 — STORY EVENTS DATASET
 // ─────────────────────────────────────────────────────────────────────────────
 
-const MYTHOLOGY_MAP = {
-
-  "Career Confusion": [
-    {
-      figure: "Ekalavya", source: "Mahabharata", text: "Adi Parva",
-      card_title:   "Ekalavya Builds His Own Path",
-      card_story:   "Ekalavya wanted to learn archery from Dronacharya — the greatest teacher of his time. Drona refused him. Wrong background, wrong caste, no place in the formal system. Instead of giving up, Ekalavya went into the forest alone and built a clay statue of Drona. He taught himself by watching, practicing, and failing — day after day, with no audience and no approval. He became so skilled that he surpassed students who had everything he was denied. His path existed nowhere in advance. He had to walk it into being.",
-      card_connect: "Not having a clear conventional path doesn't mean you're behind. Sometimes it means you're meant to build your own.",
-      teaching:     "The absence of a clear path is sometimes an invitation to build your own.",
-    },
-    {
-      figure: "Karna", source: "Mahabharata", text: "Adi Parva",
-      card_title:   "Karna Is Told He Doesn't Belong",
-      card_story:   "Karna grew up as a charioteer's son, but thought and fought like a king. When he showed up at the great archery tournament, the crowd mocked him — wrong lineage, not allowed to compete. He stood there in front of thousands while people laughed. He didn't collapse. He found another way to stand — someone recognized him, gave him a kingdom of his own, and he walked into history as one of the greatest warriors who ever lived. The system had no place for him. He made his own place.",
-      card_connect: "Feeling stuck in career often isn't about ability. It's about the world not yet having a category for what you actually are.",
-      teaching:     "What you build from your own values outlasts what others gave you permission to become.",
-    },
-    {
-      figure: "Vishwamitra", source: "Valmiki Ramayana", text: "Bala Kanda",
-      card_title:   "Vishwamitra Walks Away From His Throne",
-      card_story:   "Vishwamitra was a powerful king who walked away from everything to become something entirely different. He failed repeatedly, burned out, and started over. Each time he came back with less ego and more clarity about what he was actually after. The texts spend more time on his exhaustion and restarts than on his eventual title.",
-      card_connect: "Sometimes career confusion is the beginning of a bigger becoming — not a sign something is wrong.",
-      teaching:     "The path to what you're meant for is rarely straight, and rarely what you started with.",
-    },
-    {
-      figure: "Arjuna", source: "Bhagavad Gita", text: "Chapter 3",
-      card_title:   "Arjuna and the Question of Right Action",
-      card_story:   "Arjuna had trained his whole life for one role. But sitting at the edge of the battlefield, he couldn't figure out which action was right. Krishna didn't hand him a career plan. He said: act from your nature, not from fear of how others will judge the outcome. The clarity you're looking for doesn't come from certainty — it comes from alignment with what you actually are.",
-      card_connect: "Career confusion often isn't about not knowing what to do. It's about not yet knowing what you are — separate from what you were told to become.",
-      teaching:     "Action aligned with your nature produces clarity. Action taken from fear or comparison produces confusion.",
-    },
-    {
-      figure: "Satyakama Jabala", source: "Chandogya Upanishad", text: "Book 4",
-      card_title:   "Satyakama and the Question of Lineage",
-      card_story:   "Satyakama was asked by a great teacher: what is your lineage? He said honestly — I don't know. My mother doesn't know either. The teacher accepted him immediately, saying: only someone of true character speaks like that. He became one of the greatest students of his age.",
-      card_connect: "Not knowing where you fit can feel like weakness. Sometimes it's the most honest place to start from.",
-      teaching:     "Honesty about not knowing is the beginning of real learning — not the end of it.",
-    },
-  ],
-
-  "Life Direction": [
-    {
-      figure: "Arjuna", source: "Bhagavad Gita", text: "Chapters 1-2",
-      card_title:   "Arjuna Drops His Bow",
-      card_story:   "Arjuna was the most skilled warrior alive and dropped his bow right before the most important battle of his life. He saw his teachers on the other side. His cousins. He couldn't figure out which direction was right and the weight of it made him physically unable to move. He wasn't weak — he loved deeply and the path had just become genuinely unclear. That collapse is what started the entire Bhagavad Gita.",
-      card_connect: "Feeling lost about direction isn't a flaw. It's what happens when you care deeply and the path isn't obvious yet.",
-      teaching:     "Clarity comes through aligned action, not from waiting until doubt disappears.",
-    },
-    {
-      figure: "Rama", source: "Valmiki Ramayana", text: "Ayodhya Kanda",
-      card_title:   "Rama Chooses His Path",
-      card_story:   "Rama was about to be crowned king when in one night it was taken away. He was asked to walk into a forest for 14 years instead. He didn't spiral. He spent a few hours alone, got clear on what he valued, and walked out in the morning ready to go. Not because he didn't feel the loss — because he had decided what he would stand for, and that was steadier than what he was losing.",
-      card_connect: "Sometimes direction isn't about what you want. It's about getting clear on what you value — and walking from there.",
-      teaching:     "Clarity about your own values is the only ground to stand on when the path disappears.",
-    },
-    {
-      figure: "Nachiketa", source: "Katha Upanishad", text: "Chapters 1-2",
-      card_title:   "Nachiketa Refuses the Easy Answers",
-      card_story:   "Nachiketa walked to Death's door and waited three days for an answer about what truly matters. Death offered him wealth, pleasure, kingdoms — he refused all of it. He just wanted to know what was real. That refusal to be bought off by easier answers is what makes the Katha Upanishad worth reading thousands of years later.",
-      card_connect: "When you're confused about direction, it's often because you're still searching for what's real to you — not just what looks good from the outside.",
-      teaching:     "The direction that lasts is built on what you actually know to be true, not what you were told to want.",
-    },
-    {
-      figure: "Dhruva", source: "Bhagavata Purana", text: "Fourth Skandha",
-      card_title:   "Dhruva Goes Looking for Something Real",
-      card_story:   "Dhruva was a young boy who felt rejected and unseen. Everyone told him he was too young to seek what he was seeking. He went into the forest alone anyway and sat in meditation so completely that he became the pole star — the fixed point everything else revolves around. The search for direction started from feeling completely lost and invisible.",
-      card_connect: "Sometimes the search for direction has to start from a place of feeling completely lost and unseen. That's not a bad starting point — it's often the truest one.",
-      teaching:     "The person who searches honestly from emptiness often finds something more solid than the person who never had to look.",
-    },
-  ],
-
-  "Anxiety & Fear": [
-    {
-      figure: "Hanuman", source: "Valmiki Ramayana", text: "Sundara Kanda",
-      card_title:   "Hanuman Forgets He Can Fly",
-      card_story:   "Everyone said the ocean crossing was impossible. Hanuman had the power to do it easily — but had completely forgotten. An elder asked: do you not know what you carry? That one question was enough. He leapt.",
-      card_connect: "Fear doesn't mean you can't do it. It often means you've temporarily forgotten what you already know about yourself.",
-      teaching:     "The question is not how to stop being afraid. It is what you know about yourself that is larger than this fear.",
-    },
-    {
-      figure: "Sita", source: "Valmiki Ramayana", text: "Sundara Kanda",
-      card_title:   "Sita Alone With No Answers",
-      card_story:   "Sita was held captive with no news, no timeline, no certainty anyone was coming. She didn't pretend it was fine. But through all of it, she held onto one thing: the clarity of who she was. That didn't leave her even when everything else did.",
-      card_connect: "When fear is about uncertainty, the anchor isn't the answer. It's knowing who you are inside the uncertainty.",
-      teaching:     "Fear of the unknown becomes bearable when you know what in you cannot be taken.",
-    },
-    {
-      figure: "Arjuna", source: "Bhagavad Gita", text: "Chapter 18",
-      card_title:   "Arjuna Picks Up His Bow Again",
-      card_story:   "After the longest conversation in Indian philosophy — after every fear and doubt was named out loud — Arjuna picked his bow back up. Not because the fear was gone. Because he had looked at it fully and chosen anyway.",
-      card_connect: "Fear examined honestly often loses some of its power. You don't have to resolve it to move — you just have to look at it clearly.",
-      teaching:     "Action taken after honest examination of fear is different from action taken despite fear. One is clearer.",
-    },
-    {
-      figure: "Prahlada", source: "Bhagavata Purana", text: "Seventh Skandha",
-      card_title:   "Prahlada Walks Through Fire",
-      card_story:   "Prahlada was thrown into fire, attacked by elephants, tortured — all by his own father. Each time, something in him stayed steady. Not because he was fearless, but because he had something inside that the fear couldn't reach.",
-      card_connect: "Fear can be real and loud and still not be the final word. There's usually something in you it hasn't been able to touch.",
-      teaching:     "Courage isn't the absence of fear. It's having something inside that fear cannot reach.",
-    },
-  ],
-
-  "Burnout": [
-    {
-      figure: "Arjuna", source: "Bhagavad Gita", text: "Chapter 1",
-      card_title:   "Arjuna Sits Down",
-      card_story:   "Arjuna was the warrior everyone was counting on. He had been preparing for this for years. And then he sat down in the middle of the battlefield and simply could not go on. His bow fell. His body trembled. He was genuinely empty — the kind of empty that comes from carrying too much for too long. Krishna didn't immediately push him to get up. He sat down beside him first.",
-      card_connect: "Burnout isn't a productivity problem. It's a signal that something important has run out. Sitting with that honestly is the first step — not pushing through it.",
-      teaching:     "The collapse is not the end. It is the moment before something more honest begins.",
-    },
-    {
-      figure: "Vishwamitra", source: "Valmiki Ramayana", text: "Bala Kanda",
-      card_title:   "Vishwamitra Burns Out Again and Again",
-      card_story:   "Vishwamitra tried to force his way to greatness through sheer willpower. He failed. Burned out. Started over. Failed again. The texts spend more time on his exhaustion than his success — because that's where the real learning happened.",
-      card_connect: "Burning out doesn't mean you're not strong enough. It usually means you've been pushing at something that needs rest, not more effort.",
-      teaching:     "Burnout is what happens when effort is not matched by rest. The body knows before the mind admits it.",
-    },
-    {
-      figure: "Yudhishthira", source: "Mahabharata", text: "Shanti Parva",
-      card_title:   "Yudhishthira Refuses to Celebrate",
-      card_story:   "Yudhishthira won the war and couldn't feel any joy. He sat in the ruins, exhausted in a way that victory couldn't fix. He didn't perform happiness. He stayed with the emptiness until something real came through.",
-      card_connect: "Sometimes exhaustion goes deeper than the body. When even achieving things feels hollow — that's a different kind of tired. It deserves honesty, not a pep talk.",
-      teaching:     "The exhaustion that follows doing everything right is one of the loneliest feelings. It still deserves rest.",
-    },
-    {
-      figure: "Sita", source: "Valmiki Ramayana", text: "Uttara Kanda",
-      card_title:   "Sita Stops Proving Herself",
-      card_story:   "After years of captivity, war, and rescue — Sita was asked to prove herself one more time. She had given everything. She didn't fight or plead. She simply stopped. It was not defeat. It was a person who had nothing left to prove and knew it.",
-      card_connect: "There is a point where exhaustion isn't weakness. It's having genuinely given everything. That deserves to be named, not pushed through.",
-      teaching:     "Knowing when you have given enough is its own kind of wisdom.",
-    },
-  ],
-
-  "Overthinking": [
-    {
-      figure: "Arjuna", source: "Bhagavad Gita", text: "Chapter 2",
-      card_title:   "Krishna's One Question",
-      card_story:   "Arjuna's mind ran everywhere at once — his teachers, his cousins, his guilt, his dharma. Krishna didn't tell him to stop thinking. He asked one question: what is actually yours to do right now? That question cut through everything.",
-      card_connect: "Overthinking usually means you're trying to solve everything at once. The question is only ever: what is mine to do right now?",
-      teaching:     "One clear action chosen from your values is worth more than a thousand thoughts about every possible outcome.",
-    },
-    {
-      figure: "Nachiketa", source: "Katha Upanishad", text: "Chapters 1-2",
-      card_title:   "Nachiketa Stops Reaching for More",
-      card_story:   "Nachiketa sat outside Death's door for three days with no food and no answer. When Death offered him wealth and pleasure instead of the truth he asked for, Nachiketa said no. He just wanted to know what was real. The mind can only find solid ground by going quiet — not by thinking harder.",
-      card_connect: "The mind keeps spinning because it's looking for solid ground. But some things can only be found by going quiet, not by adding more thoughts.",
-      teaching:     "You cannot solve your way to peace. Stillness is not the absence of thought — it's the decision to stop feeding every one.",
-    },
-    {
-      figure: "Ashtavakra", source: "Ashtavakra Gita", text: "Chapter 1",
-      card_title:   "Ashtavakra and the Stillness Beneath Thought",
-      card_story:   "Ashtavakra was a sage who taught that the self watching the thoughts is always already still. The thoughts come and go. The one watching them doesn't move. He wasn't teaching detachment — he was pointing to something that was never caught in the loop to begin with.",
-      card_connect: "There is a part of you that is not inside the overthinking. It's the part noticing it. That part has never been tangled.",
-      teaching:     "You are not your thoughts. You are the one watching them — and that watcher is already still.",
-    },
-  ],
-
-  "Family Pressure": [
-    {
-      figure: "Rama", source: "Valmiki Ramayana", text: "Ayodhya Kanda",
-      card_title:   "Rama's Exile",
-      card_story:   "Rama was about to become king — the thing his whole life had prepared him for. His father asked him to give it up for 14 years because of a promise made to a stepmother. He didn't fight it. He chose, clearly, what he would honor — and walked.",
-      card_connect: "Family pressure hurts most when you don't know what you yourself actually want. Getting clear on your own values quietly is the only solid ground.",
-      teaching:     "Know what you are choosing and why. That clarity is the only thing that makes family pressure bearable.",
-    },
-    {
-      figure: "Karna", source: "Mahabharata", text: "Udyoga Parva",
-      card_title:   "Karna Says No to His Mother",
-      card_story:   "Just before the war, Karna's birth mother came to him with an offer — recognition, legitimacy, a place in the family — if he switched sides. He said no. He chose the loyalty he had actually lived, not the family he had been born into.",
-      card_connect: "Family obligation and your own integrity don't always point the same direction. You get to decide which one you live by.",
-      teaching:     "The family you choose to honor through your actions matters as much as the family you were born into.",
-    },
-    {
-      figure: "Yudhishthira", source: "Mahabharata", text: "Sabha Parva",
-      card_title:   "Yudhishthira and the Weight of Expectation",
-      card_story:   "Yudhishthira was expected to be perfect — the eldest, the righteous one, the king everyone leaned on. The weight of that expectation eventually led him to make one of the worst decisions of his life. The Mahabharata doesn't excuse it, but it shows what unexamined pressure does.",
-      card_connect: "The pressure to be everything a family needs can quietly erode your own judgment. Noticing that pressure is the first step to not being completely shaped by it.",
-      teaching:     "Expectation that is never examined often acts on you without your knowing. Naming it gives you back some choice.",
-    },
-  ],
-
-  "Self-Worth & Shame": [
-    {
-      figure: "Draupadi", source: "Mahabharata", text: "Sabha Parva",
-      card_title:   "Draupadi Calls Out",
-      card_story:   "Draupadi was humiliated in front of an entire royal court. Every person she trusted looked away. She called out anyway. Years later she walked out of a war she never started, still herself.",
-      card_connect: "What happened to you is not who you are. The fact that you're still asking that question means your sense of self is still intact.",
-      teaching:     "Shame belongs to the act, not to you.",
-    },
-    {
-      figure: "Karna", source: "Mahabharata", text: "Adi Parva",
-      card_title:   "Karna Stands in the Court",
-      card_story:   "Karna walked into a tournament and was publicly mocked — wrong birth, wrong caste, not allowed to compete. He stood there, insulted in front of thousands. He didn't collapse. He found another way to stand.",
-      card_connect: "Being dismissed or shamed by others doesn't settle the question of your worth. It just means they didn't look properly.",
-      teaching:     "Worth built from what you know about yourself holds. Worth that depends on others' recognition is fragile.",
-    },
-    {
-      figure: "Sita", source: "Valmiki Ramayana", text: "Uttara Kanda",
-      card_title:   "Sita's Final Stand",
-      card_story:   "After everything she survived, Sita was asked to prove herself one more time. She had proven enough. She called the earth to witness — not the court, not the king — and walked away with her dignity completely intact.",
-      card_connect: "There comes a point where you stop proving yourself to people who have already decided. Your worth was never in their hands.",
-      teaching:     "The self that knows its own truth does not need an audience to confirm it.",
-    },
-  ],
-
-  "Grief & Loss": [
-    {
-      figure: "Yudhishthira", source: "Mahabharata", text: "Shanti Parva",
-      card_title:   "Yudhishthira in the Ruins",
-      card_story:   "Yudhishthira won the war and lost nearly everyone he loved in it. He sat in the ruins and refused to celebrate. He didn't try to move on — he asked: how does a person live with this?",
-      card_connect: "Grief isn't a problem to get through quickly. It's love that has nowhere to go. Sitting with it is not weakness.",
-      teaching:     "Grief is not a stage. It is love with nowhere to go. Honoring it is the only passage through it.",
-    },
-    {
-      figure: "Rama", source: "Valmiki Ramayana", text: "Aranya Kanda",
-      card_title:   "Rama Searching the Forest",
-      card_story:   "When Sita disappeared, Rama searched the entire forest calling her name. He wept at every tree, asked every animal. The Ramayana shows a person who loved someone and lost them and didn't pretend it was fine.",
-      card_connect: "Grief doesn't have a dignified form. It looks like searching. Like calling a name into empty space. That's real and it's allowed.",
-      teaching:     "You don't have to hold grief with dignity. You just have to hold it honestly.",
-    },
-    {
-      figure: "Kunti", source: "Mahabharata", text: "Stri Parva",
-      card_title:   "Kunti Finally Speaks",
-      card_story:   "Kunti lost a son she could never publicly claim — a secret she carried for decades. At the end of the war, she finally named him out loud for the first time. The Mahabharata doesn't rush past that moment. It stays there.",
-      card_connect: "Some grief has to be unnamed for a long time before it can be spoken. When it finally surfaces, it deserves to be witnessed — not rushed.",
-      teaching:     "Grief held silently for years needs to be witnessed before it can begin to move.",
-    },
-  ],
-
-  "Relationship Issues": [
-    {
-      figure: "Savitri", source: "Mahabharata", text: "Vana Parva",
-      card_title:   "Savitri Follows Death",
-      card_story:   "Savitri chose to marry someone she knew would die within a year. When Death came, she followed quietly and argued — not with anger, not with tears — with total clarity. She didn't lose herself in the love. That's exactly why she kept it.",
-      card_connect: "The hardest part of any relationship is staying connected to who you are inside it. That's not selfishness — it's what makes the love real.",
-      teaching:     "The love that endures faces loss without losing itself.",
-    },
-    {
-      figure: "Nala and Damayanti", source: "Mahabharata", text: "Vana Parva",
-      card_title:   "Nala and Damayanti",
-      card_story:   "Damayanti chose Nala over gods. Then he lost everything and abandoned her in a forest. She spent years finding her way back to herself. When they reunited, both had become different people. The love held, but had to be rebuilt.",
-      card_connect: "Sometimes relationships break down not from lack of love but from one or both people losing themselves. Coming back to each other requires coming back to yourself first.",
-      teaching:     "Love that survives loss comes back changed — and that changed version is often truer than the original.",
-    },
-    {
-      figure: "Draupadi", source: "Mahabharata", text: "Sabha Parva",
-      card_title:   "Draupadi's Question",
-      card_story:   "In the most painful moment of her life, Draupadi asked one clear question: was this right? Not to the person who hurt her — to the whole court. She didn't dissolve into the pain. She named what happened and asked people to look at it honestly.",
-      card_connect: "In painful relationships, the hardest thing is naming what's actually happening — not managing it, not excusing it. Just naming it clearly.",
-      teaching:     "Clarity about what is happening is the first thing a relationship needs — from you, about you.",
-    },
-  ],
-
-  "Loneliness & Isolation": [
-    {
-      figure: "Sita", source: "Valmiki Ramayana", text: "Sundara Kanda",
-      card_title:   "Sita in the Garden",
-      card_story:   "Sita was held captive with no news and no idea when things would change. She didn't pretend it was fine. But she held onto one thing: she knew exactly who she was. That didn't leave her.",
-      card_connect: "Loneliness becomes unbearable when it feels like you've also lost yourself. But there's usually something in there that the isolation hasn't touched yet.",
-      teaching:     "There is a version of aloneness that is contact with your own depths — not punishment, but presence.",
-    },
-    {
-      figure: "Ekalavya", source: "Mahabharata", text: "Adi Parva",
-      card_title:   "Ekalavya Alone in the Forest",
-      card_story:   "Ekalavya practiced completely alone for years. No teacher, no classmates, no audience. Just him and a clay statue and a bow. He didn't stop because no one was watching. He kept going because the work itself was real to him.",
-      card_connect: "Sometimes being alone strips everything down to what's actually real for you — what you'd do even if no one ever saw it.",
-      teaching:     "Solitude can reveal what you actually value when the noise of other people's approval falls away.",
-    },
-    {
-      figure: "Yudhishthira", source: "Mahabharata", text: "Mahaprasthanika Parva",
-      card_title:   "Yudhishthira's Final Walk",
-      card_story:   "At the end of everything, Yudhishthira walked toward the mountains alone — his family falling away one by one. Only a dog stayed. When told the dog couldn't enter heaven, he refused to go in without it.",
-      card_connect: "In deep loneliness, sometimes what keeps you is one small loyal thing — not the grand company you lost, but one true presence.",
-      teaching:     "Who stays with you in the hardest walk is worth more than who celebrated with you at the peak.",
-    },
-  ],
-
-  "Identity Crisis": [
-    {
-      figure: "Karna", source: "Mahabharata", text: "Karna Parva",
-      card_title:   "Karna Lives Without an Answer",
-      card_story:   "Karna spent his whole life being told he was a charioteer's son — but he thought, fought, and led like a king. He never got a clean answer about who he really was. He just decided what he stood for and lived that way anyway.",
-      card_connect: "You don't need to fully figure out who you are before you start living with integrity. Sometimes identity is built forward, not found.",
-      teaching:     "Identity is not found — it is built from what you choose to stand for.",
-    },
-    {
-      figure: "Arjuna", source: "Bhagavad Gita", text: "Chapters 1-2",
-      card_title:   "Arjuna Says He Doesn't Know Who He Is",
-      card_story:   "Arjuna sat in his chariot and said: I don't know who I am anymore. Not the warrior, not the son, not the student. Krishna didn't laugh at him. He spent 18 chapters helping him find his way back to himself.",
-      card_connect: "Not knowing who you are isn't weakness. It's sometimes the most honest thing a person can say — and the beginning of something real.",
-      teaching:     "The identity crisis is often the moment before a deeper, truer self begins to form.",
-    },
-    {
-      figure: "Vishwamitra", source: "Valmiki Ramayana", text: "Bala Kanda",
-      card_title:   "Vishwamitra Between Two Worlds",
-      card_story:   "Vishwamitra was born a king but felt called to be a sage. For most of his life he was neither — too changed to go back, not yet arrived at where he was going. The texts spend more time on his in-between years than his final title.",
-      card_connect: "Being between identities — not who you were, not yet who you're becoming — is one of the hardest places to live. But it's also where the real change happens.",
-      teaching:     "The in-between is not failure. It is the most honest part of becoming.",
-    },
-  ],
-
-  "Anger & Resentment": [
-    {
-      figure: "Draupadi", source: "Mahabharata", text: "Sabha Parva",
-      card_title:   "Draupadi's Steady Anger",
-      card_story:   "After being humiliated in court, Draupadi made one vow: she would not bind her hair until justice was done. She carried that anger for 13 years — not as bitterness, but as a clear steady flame. It didn't consume her. It kept her honest.",
-      card_connect: "Anger held with clarity — not suppressed, not exploded — can become the thing that keeps you true to yourself.",
-      teaching:     "There is a kind of anger that is not destruction. It is the refusal to pretend that what happened was acceptable.",
-    },
-    {
-      figure: "Duryodhana", source: "Mahabharata", text: "Udyoga Parva",
-      card_title:   "Duryodhana's Anger Is Never Heard",
-      card_story:   "Duryodhana's anger was real — he had been genuinely humiliated and never given space to say so. Over years, that unheard anger hardened into something he couldn't put down. The Mahabharata shows what happens when anger never gets to speak.",
-      card_connect: "Anger is usually protecting something — a wound, a line that was crossed. The question isn't how to stop feeling it. It's what it's guarding.",
-      teaching:     "Anger that is witnessed can move. Anger that is never heard hardens into something heavier.",
-    },
-    {
-      figure: "Parashurama", source: "Mahabharata", text: "Adi Parva",
-      card_title:   "Parashurama's Rage and Its Cost",
-      card_story:   "Parashurama's father was killed unjustly. His grief turned to rage and he acted on it completely — and spent the rest of his life reckoning with what that cost him. The texts don't glorify or condemn his anger. They show the full weight of what unexamined rage does.",
-      card_connect: "Rage that hasn't been understood tends to cost you more than the person it's aimed at.",
-      teaching:     "The question is not whether the anger is justified. It is what you want to do with it — and what that will cost you.",
-    },
-  ],
-
-  "Gratitude & Positive Sharing": [
-    {
-      figure: "Sudama", source: "Bhagavata Purana", text: "Tenth Skandha",
-      card_title:   "Sudama and Krishna",
-      card_story:   "Sudama was poor and embarrassed — he walked to see his old friend Krishna with just a handful of puffed rice. Krishna ran out to meet him, wept, and washed his feet. The whole meeting was just joy. No agenda, no lesson.",
-      card_connect: "When something good happens, it deserves to be fully felt — not minimized, not immediately turned into a lesson.",
-      teaching:     "Gratitude received fully is its own kind of wisdom.",
-    },
-    {
-      figure: "Hanuman", source: "Valmiki Ramayana", text: "Yuddha Kanda",
-      card_title:   "Hanuman's Unguarded Joy",
-      card_story:   "When Hanuman found Sita alive, he didn't just deliver the news. He leapt and destroyed a forest out of pure joy. The Ramayana records his celebration as something complete and unrestrained — not excessive, just honest.",
-      card_connect: "When good news comes — when something you hoped for turns out to be true — full joy is the right response. Don't hold it back.",
-      teaching:     "Unguarded joy, expressed fully, is one of the most honest things a person can offer.",
-    },
-  ],
-};
-
-
-// ─────────────────────────────────────────────────────────────────────────────
-//  SECTION 2 — PSYCHOLOGY LAYER
-//  Shapes response approach + supplies strong questions per intent.
-//  Not visible to user — woven into system prompt only.
-// ─────────────────────────────────────────────────────────────────────────────
-
-const PSYCHOLOGY_MAP = {
-  "Career Confusion": {
-    approach:  "Narrative Therapy — re-author the career story",
-    avoid:     "Don't suggest paths, pivots, or career advice. Don't reframe positively before the emotion lands.",
-    deepen:    "Separate what they are doing from what feels meaningful. Surface the gap between the role they are in and who they actually are.",
-    questions: [
-      "What does a day feel like when work actually makes sense to you?",
-      "Is the confusion about the job itself — or about whether this direction is even yours?",
-      "What were you hoping this path would feel like — and where did that feeling go?",
-      "What's the one thing about your work that used to feel worthwhile?",
-      "Is this about what you want to do — or about who you want to be?",
-    ],
+const STORY_EVENTS = [
+  {
+    id: "KARNA_REJECTION", character: "Karna", source: "Mahabharata", event: "Denied participation at archery tournament due to birth",
+    themes: ["rejection", "identity", "injustice", "talent-unrecognised"],
+    intents: ["Career Confusion", "Self-Worth & Shame"],
+    card_title: "Karna Is Told He Doesn't Belong",
+    card_story: "Karna grew up as a charioteer's son, but thought and fought like a king. When he showed up at the great archery tournament, the crowd mocked him — wrong lineage, not allowed to compete. He stood there in front of thousands while people laughed. He didn't collapse. He found another way to stand — someone recognised him, gave him a kingdom of his own, and he walked into history as one of the greatest warriors who ever lived. The system had no place for him. He made his own place.",
+    card_connect: "Feeling stuck in career often isn't about ability. It's about the world not yet having a category for what you actually are.",
+    teaching: "What you build from your own values outlasts what others gave you permission to become.",
   },
-  "Life Direction": {
-    approach:  "ACT — values clarification over goal-setting",
-    avoid:     "Don't suggest paths. Don't ask 'what do you want to be' — too abstract and too loaded.",
-    deepen:    "Help them separate what they want from what they were told to want. The confusion is usually between two competing 'right answers' — neither of which is actually theirs.",
-    questions: [
-      "Which of the options you're weighing feels more like yours — and which feels like what's expected?",
-      "If no one else's opinion mattered here, which direction would you already know?",
-      "What's the thing you keep moving toward even when you talk yourself out of it?",
-      "Is this a question of direction — or a question of permission?",
-      "What would you do if you trusted that any choice could be made to work?",
-    ],
+  {
+    id: "EKALAVYA_TRAINING", character: "Ekalavya", source: "Mahabharata", event: "Learns archery alone in the forest after being refused by Drona",
+    themes: ["self-made", "discipline", "rejection", "alternative-path"],
+    intents: ["Career Confusion"],
+    card_title: "Ekalavya Builds His Own Path",
+    card_story: "Ekalavya wanted to learn archery from Dronacharya — the greatest teacher of his time. Drona refused him. Wrong background, wrong caste, no place in the formal system. Instead of giving up, Ekalavya went into the forest alone and built a clay statue of Drona. He taught himself by watching, practising, and failing — day after day, with no audience and no approval. He became so skilled that he surpassed students who had everything he was denied. His path existed nowhere in advance. He had to walk it into being.",
+    card_connect: "Not having a clear conventional path doesn't mean you're behind. Sometimes it means you're meant to build your own.",
+    teaching: "The absence of a clear path is sometimes an invitation to build your own.",
   },
-  "Anxiety & Fear": {
-    approach:  "ACT defusion — fear as signal, not verdict",
-    avoid:     "Don't minimize. Don't offer breathing techniques. Don't jump to 'you'll be okay'.",
-    deepen:    "Name the fear specifically. Fear of what exactly? The fear usually has a shape — failure, judgment, loss, the unknown. Naming the shape reduces its power.",
-    questions: [
-      "What is the fear most worried about — the thing that would be hardest to live with?",
-      "Is this fear about something specific that might happen, or more about losing control of the outcome?",
-      "What would you do if you knew the fear was going to be there regardless?",
-      "Has this fear been right before — or has it mostly been louder than what actually happened?",
-    ],
+  {
+    id: "ARJUNA_DOUBT", character: "Arjuna", source: "Bhagavad Gita", event: "Drops bow before battle, paralysed by confusion and grief",
+    themes: ["confusion", "dharma", "clarity-sought", "identity"],
+    intents: ["Career Confusion", "Life Direction"],
+    card_title: "Arjuna and the Question of Right Action",
+    card_story: "Arjuna had trained his whole life for one role. But sitting at the edge of the battlefield, he couldn't figure out which action was right. Krishna didn't hand him a career plan. He said: act from your nature, not from fear of how others will judge the outcome. The clarity you're looking for doesn't come from certainty — it comes from alignment with what you actually are.",
+    card_connect: "Career confusion often isn't about not knowing what to do. It's about not yet knowing what you are — separate from what you were told to become.",
+    teaching: "Action aligned with your nature produces clarity. Action taken from fear or comparison produces confusion.",
   },
-  "Burnout": {
-    approach:  "Stress-Recovery Model — rest as wisdom, not failure",
-    avoid:     "Do NOT motivate. Do NOT suggest productivity systems or action steps. Do not give tips.",
-    deepen:    "The exhaustion usually has a story underneath it — something they kept pushing through that deserved to stop sooner. What was it? Why did they keep going?",
-    questions: [
-      "When did you first notice you were running on empty — and what made you keep going anyway?",
-      "What would it mean to actually stop, even for a few days?",
-      "Is the exhaustion from the work itself — or from something the work keeps not giving you?",
-      "What are you holding right now that no one else seems to see you carrying?",
-    ],
+  {
+    id: "VISHWAMITRA_SHIFT", character: "Vishwamitra", source: "Valmiki Ramayana", event: "Leaves kingship to pursue something entirely different",
+    themes: ["reinvention", "transformation", "starting-over"],
+    intents: ["Career Confusion"],
+    card_title: "Vishwamitra Walks Away From His Throne",
+    card_story: "Vishwamitra was a powerful king who walked away from everything to become something entirely different. He failed repeatedly, burned out, and started over. Each time he came back with less ego and more clarity about what he was actually after. The texts spend more time on his exhaustion and restarts than on his eventual title.",
+    card_connect: "Sometimes career confusion is the beginning of a bigger becoming — not a sign something is wrong.",
+    teaching: "The path to what you're meant for is rarely straight, and rarely what you started with.",
   },
-  "Overthinking": {
-    approach:  "MBCT — defusion, not analysis of thought content",
-    avoid:     "Don't analyze the content of the thoughts. Don't offer 'try this' techniques.",
-    deepen:    "The loop usually has a core fear underneath it — something the mind is trying to solve that isn't actually solvable by thinking. What is it protecting them from?",
-    questions: [
-      "What is the thought actually trying to protect you from?",
-      "Is there a decision underneath all this — and what's making it hard to make?",
-      "What would you do right now if you trusted yourself enough to just decide?",
-      "When the loop quiets down — even briefly — what's the first thing you feel?",
-    ],
+  {
+    id: "SATYAKAMA_TRUTH", character: "Satyakama Jabala", source: "Chandogya Upanishad", event: "Speaks truth about not knowing his lineage — and is accepted by the teacher",
+    themes: ["honesty", "identity", "not-knowing", "authentic-start"],
+    intents: ["Career Confusion", "Self-Worth & Shame"],
+    card_title: "Satyakama and the Question of Lineage",
+    card_story: "Satyakama was asked by a great teacher: what is your lineage? He said honestly — I don't know. My mother doesn't know either. The teacher accepted him immediately, saying: only someone of true character speaks like that. He became one of the greatest students of his age.",
+    card_connect: "Not knowing where you fit can feel like weakness. Sometimes it's the most honest place to start from.",
+    teaching: "Honesty about not knowing is the beginning of real learning — not the end of it.",
   },
-  "Family Pressure": {
-    approach:  "Bowen Family Systems — differentiation of self",
-    avoid:     "Never tell them to rebel or comply. Don't frame family as the enemy.",
-    deepen:    "Help them separate their own voice from internalized family voices. The heaviest part is usually not what family is asking — it's that they don't know what they themselves actually want.",
-    questions: [
-      "Underneath all the pressure, what do you actually want — not what you think you should want?",
-      "Is this pressure about what they want from you — or about your fear of disappointing them?",
-      "What would you choose if you knew the relationship would survive any answer?",
-      "Whose voice is loudest when you're trying to decide — yours or theirs?",
-    ],
+  {
+    id: "KARNA_OUTSIDER", character: "Karna", source: "Mahabharata", event: "Lives his whole life as an outsider despite exceptional talent",
+    themes: ["identity", "injustice", "belonging", "talent-unrecognised"],
+    intents: ["Career Confusion", "Identity Crisis"],
+    card_title: "Karna Lives Outside Every Category",
+    card_story: "Karna was a warrior who didn't fit any box the world had made. Too noble to be a servant, too low-born for the court, too loyal to change sides. The world kept trying to define him by what he lacked. He kept defining himself by what he chose to stand for. That gap — between how the world saw him and who he knew himself to be — was the central tension of his entire life.",
+    card_connect: "Feeling like you don't fit the system isn't always a problem to fix. Sometimes it's a description of someone the system hasn't caught up with yet.",
+    teaching: "Identity is not what the world assigns you. It is what you choose to stand for regardless.",
   },
-  "Self-Worth & Shame": {
-    approach:  "Compassion-Focused Therapy — self-compassion, not positive affirmation",
-    avoid:     "Don't reassure with 'you're great'. Let them name the shame before moving anywhere.",
-    deepen:    "The shame usually points to a gap between who they are and who they think they should be. Where did that standard come from? Who set it?",
-    questions: [
-      "Is the feeling of not being enough about something specific — or more like background noise?",
-      "Where did the standard you're measuring yourself against actually come from?",
-      "What would you say to a close friend who felt exactly the way you're feeling right now?",
-      "When did you start believing this was true about you?",
-    ],
+  {
+    id: "RAMA_EXILE", character: "Rama", source: "Valmiki Ramayana", event: "Accepts 14-year exile on the eve of coronation without bitterness",
+    themes: ["values", "duty", "loss-accepted", "clarity-through-values"],
+    intents: ["Life Direction"],
+    card_title: "Rama Chooses His Path",
+    card_story: "Rama was about to be crowned king when in one night it was taken away. He was asked to walk into a forest for 14 years instead. He didn't spiral. He spent a few hours alone, got clear on what he valued, and walked out in the morning ready to go. Not because he didn't feel the loss — because he had decided what he would stand for, and that was steadier than what he was losing.",
+    card_connect: "Sometimes direction isn't about what you want. It's about getting clear on what you value — and walking from there.",
+    teaching: "Clarity about your own values is the only ground to stand on when the path disappears.",
   },
-  "Grief & Loss": {
-    approach:  "Continuing Bonds Model — witnessing and presence, not rushing",
-    avoid:     "Never say time heals. Never rush to acceptance. Don't ask a question before the grief has been named and sat with.",
-    deepen:    "Just be present. The most useful thing is to name what they lost and stay there — not to move them through it quickly.",
-    questions: [
-      "What do you miss most — the person, the future you imagined, or something else?",
-      "What's the hardest part of this to carry right now?",
-    ],
+  {
+    id: "NACHIKETA_QUEST", character: "Nachiketa", source: "Katha Upanishad", event: "Seeks truth from Death itself, refusing all temptations offered",
+    themes: ["purpose", "truth-seeking", "refusing-easy-answers"],
+    intents: ["Life Direction", "Overthinking"],
+    card_title: "Nachiketa Refuses the Easy Answers",
+    card_story: "Nachiketa walked to Death's door and waited three days for an answer about what truly matters. Death offered him wealth, pleasure, kingdoms — he refused all of it. He just wanted to know what was real. That refusal to be bought off by easier answers is what makes the Katha Upanishad worth reading thousands of years later.",
+    card_connect: "When you're confused about direction, it's often because you're still searching for what's real to you — not just what looks good from the outside.",
+    teaching: "The direction that lasts is built on what you actually know to be true, not what you were told to want.",
   },
-  "Relationship Issues": {
-    approach:  "Emotionally Focused Therapy — attachment need beneath the conflict",
-    avoid:     "Don't take sides. Don't analyze the other person.",
-    deepen:    "The conflict on the surface is usually about something much simpler underneath — needing to feel seen, heard, chosen, or safe. What is that need?",
-    questions: [
-      "What's the thing you most need from this person that you're not getting?",
-      "Is this a pattern you've seen before — in this relationship or earlier ones?",
-      "Are you more hurt or more angry right now — and which came first?",
-      "What would it take for you to feel okay here — not fixed, just okay?",
-    ],
+  {
+    id: "DHRUVA_SEARCH", character: "Dhruva", source: "Bhagavata Purana", event: "Young boy meditates alone to find something solid after feeling rejected and unseen",
+    themes: ["purpose", "self-directed", "invisible-to-visible"],
+    intents: ["Life Direction"],
+    card_title: "Dhruva Goes Looking for Something Real",
+    card_story: "Dhruva was a young boy who felt rejected and unseen. Everyone told him he was too young to seek what he was seeking. He went into the forest alone anyway and sat in meditation so completely that he became the pole star — the fixed point everything else revolves around. The search for direction started from feeling completely lost and invisible.",
+    card_connect: "Sometimes the search for direction has to start from a place of feeling completely lost and unseen. That's not a bad starting point — it's often the truest one.",
+    teaching: "The person who searches honestly from emptiness often finds something more solid than the person who never had to look.",
   },
-  "Loneliness & Isolation": {
-    approach:  "Attachment Theory — distinguish aloneness from abandonment",
-    avoid:     "Don't offer social tips. Don't say 'put yourself out there'.",
-    deepen:    "There's usually a specific ache underneath 'lonely' — not being understood, not being chosen, or feeling invisible even around people. Which one is it?",
-    questions: [
-      "Is it that there are no people around — or that none of the people around really see you?",
-      "When did you last feel genuinely connected to someone — and what made that different?",
-      "Is there a version of yourself you've lost touch with, not just people?",
-    ],
+  {
+    id: "BHISHMA_VOW", character: "Bhishma", source: "Mahabharata", event: "Takes lifelong celibacy vow so his father can remarry — a sacrifice no one asked for",
+    themes: ["sacrifice", "self-determination", "living-by-choice"],
+    intents: ["Life Direction", "Family Pressure"],
+    card_title: "Bhishma Chooses His Sacrifice",
+    card_story: "Bhishma was the crown prince. He gave it all up — the throne, marriage, children, legacy — so his aging father could have happiness. No one forced him. He chose it completely. The Mahabharata doesn't frame this as saintly. It frames it as a person who decided what he would stand for, and then lived entirely inside that decision for the rest of his life.",
+    card_connect: "Sometimes the direction you choose is less about what you gain and more about what you're willing to stand for consistently.",
+    teaching: "A life built on one clear choice, fully lived, is more coherent than a life built on a thousand unclear ones.",
   },
-  "Identity Crisis": {
-    approach:  "Existential Therapy — build identity forward, don't find it backward",
-    avoid:     "Don't suggest answers. Don't say 'you'll figure it out'.",
-    deepen:    "Identity confusion usually isn't about not knowing who you are — it's about the old version no longer fitting and the new one not yet formed. What changed?",
-    questions: [
-      "What's the thing that used to feel like 'you' that doesn't anymore?",
-      "Is the confusion about who you are — or about who you're supposed to be for everyone else?",
-      "What have you always stood for, even before you had a name for it?",
-      "What would the person you're becoming do differently from who you've been?",
-    ],
+  {
+    id: "SHABARI_WAIT", character: "Shabari", source: "Valmiki Ramayana", event: "Waits years alone in the forest, certain Rama will come",
+    themes: ["patience", "trust", "quiet-purpose", "long-wait"],
+    intents: ["Life Direction"],
+    card_title: "Shabari Waits With Certainty",
+    card_story: "Shabari's teacher told her Rama would come. She stayed in the forest alone for years after her teacher died, keeping the ashram, keeping berries ready, waiting. She never wavered. When Rama finally came, she fed him fruit she had tasted herself to make sure only the sweetest ones were offered. The texts treat this as one of the most perfect moments of devotion in the epic.",
+    card_connect: "Sometimes direction isn't about movement. It's about being clear enough about what you're waiting for that the waiting itself becomes purposeful.",
+    teaching: "Patience that comes from genuine certainty is different from patience that comes from resignation.",
   },
-  "Anger & Resentment": {
-    approach:  "Gestalt — completion, the blocked need underneath the anger",
-    avoid:     "Don't say 'let it go'. Don't minimize. Don't moralize about anger.",
-    deepen:    "Anger always has a need underneath it — something that was taken, dismissed, or violated. What is it? The anger doesn't go away until that need gets named.",
-    questions: [
-      "What did you need in that situation that you didn't get?",
-      "Is the anger about what happened — or about the fact that it happened again?",
-      "What would it take for this to actually feel resolved — not forgiven, just resolved?",
-      "Who are you most angry at — them, yourself, or the situation?",
-    ],
+  {
+    id: "MEERA_DEVOTION", character: "Meera", source: "Bhakti tradition", event: "Chooses devotion to Krishna over royal duty, walks away from palace life",
+    themes: ["freedom", "unconventional-path", "inner-voice-over-society"],
+    intents: ["Life Direction", "Identity Crisis"],
+    card_title: "Meera Walks Out",
+    card_story: "Meera was a queen who sang devotional songs in the street. Her family was humiliated. The court tried to stop her. She kept going. She wasn't reckless — she was absolutely clear about what she valued more than status, approval, or safety. She walked away from a life that looked complete from the outside because it was empty on the inside.",
+    card_connect: "Direction that's genuinely yours often looks irresponsible to people who've never felt that kind of clarity.",
+    teaching: "The life that looks wrong from the outside can be exactly right from the inside.",
   },
-  "Gratitude & Positive Sharing": {
-    approach:  "Positive Psychology — savoring",
-    avoid:     "Don't pivot to challenge. Don't introduce complexity into a positive moment.",
-    deepen:    "Receive it. Match their energy. Let the good thing be good.",
-    questions: [
-      "What made this land differently than you expected?",
-      "How long has this been coming?",
-    ],
+  {
+    id: "HANUMAN_DOUBT", character: "Hanuman", source: "Valmiki Ramayana", event: "Forgets his own power until an elder reminds him",
+    themes: ["fear", "self-doubt", "forgotten-strength", "reminder"],
+    intents: ["Anxiety & Fear"],
+    card_title: "Hanuman Forgets He Can Fly",
+    card_story: "Everyone said the ocean crossing was impossible. Hanuman had the power to do it easily — but had completely forgotten. An elder asked: do you not know what you carry? That one question was enough. He leapt.",
+    card_connect: "Fear doesn't mean you can't do it. It often means you've temporarily forgotten what you already know about yourself.",
+    teaching: "The question is not how to stop being afraid. It is what you know about yourself that is larger than this fear.",
   },
-};
-
-
-// ─────────────────────────────────────────────────────────────────────────────
-//  SECTION 3 — SEVERITY + MODES
-// ─────────────────────────────────────────────────────────────────────────────
-
-const SEVERITY_MODES = {
-  L1: "reflective",
-  L2: "guided",
-  L3: "stabilizing",
-  // L4 never assigned by escalation logic — only by crisis keyword check
-};
-
-
-// ─────────────────────────────────────────────────────────────────────────────
-//  SECTION 4 — CRISIS + EDGE CASES
-// ─────────────────────────────────────────────────────────────────────────────
-
-const CRISIS_KEYWORDS = [
-  "want to die", "kill myself", "end my life", "suicide", "suicidal",
-  "don't want to live", "no reason to live", "better off dead",
-  "want to disappear forever", "not worth living", "can't go on",
-  "ending it all", "self harm", "hurt myself", "cut myself",
-  "jina nahi chahta", "mar jana chahta", "zindagi khatam",
-  "life is not worth", "nobody would miss me", "i give up on life",
+  {
+    id: "SITA_WAIT", character: "Sita", source: "Valmiki Ramayana", event: "Waits alone in captivity with no news, holding onto inner clarity",
+    themes: ["uncertainty", "inner-anchor", "no-external-certainty"],
+    intents: ["Anxiety & Fear"],
+    card_title: "Sita Alone With No Answers",
+    card_story: "Sita was held captive with no news, no timeline, no certainty anyone was coming. She didn't pretend it was fine. But through all of it, she held onto one thing: the clarity of who she was. That didn't leave her even when everything else did.",
+    card_connect: "When fear is about uncertainty, the anchor isn't the answer. It's knowing who you are inside the uncertainty.",
+    teaching: "Fear of the unknown becomes bearable when you know what in you cannot be taken.",
+  },
+  {
+    id: "PRAHLADA_FAITH", character: "Prahlada", source: "Bhagavata Purana", event: "Faces repeated torture by his own father and stays inwardly calm",
+    themes: ["fear", "courage", "inner-resource", "external-threat"],
+    intents: ["Anxiety & Fear"],
+    card_title: "Prahlada Walks Through Fire",
+    card_story: "Prahlada was thrown into fire, attacked by elephants, tortured — all by his own father. Each time, something in him stayed steady. Not because he was fearless, but because he had something inside that the fear couldn't reach.",
+    card_connect: "Fear can be real and loud and still not be the final word. There's usually something in you it hasn't been able to touch.",
+    teaching: "Courage isn't the absence of fear. It's having something inside that fear cannot reach.",
+  },
+  {
+    id: "ABHIMANYU_ENTRY", character: "Abhimanyu", source: "Mahabharata", event: "Enters the chakravyuh formation knowing he may not get out",
+    themes: ["courage", "fear", "moving-despite-odds", "commitment"],
+    intents: ["Anxiety & Fear"],
+    card_title: "Abhimanyu Enters Anyway",
+    card_story: "Abhimanyu knew how to enter the chakravyuh — the impossible spiral formation — but not how to exit. He went in anyway. The Mahabharata doesn't call him reckless. It calls him brave in the way that matters — not fearless, but willing to move despite knowing the odds.",
+    card_connect: "Sometimes you act not because you know how it ends, but because the action is still yours to take.",
+    teaching: "Courage is often about moving into what you can't control, not waiting until you can.",
+  },
+  {
+    id: "ARJUNA_FEAR", character: "Arjuna", source: "Bhagavad Gita", event: "Overwhelmed by fear of consequences before the battle begins",
+    themes: ["fear", "consequences", "paralysis"],
+    intents: ["Anxiety & Fear"],
+    card_title: "Arjuna Picks Up His Bow Again",
+    card_story: "After the longest conversation in Indian philosophy — after every fear and doubt was named out loud — Arjuna picked his bow back up. Not because the fear was gone. Because he had looked at it fully and chosen anyway.",
+    card_connect: "Fear examined honestly often loses some of its power. You don't have to resolve it to move — you just have to look at it clearly.",
+    teaching: "Action taken after honest examination of fear is different from action taken despite fear. One is clearer.",
+  },
+  {
+    id: "ARJUNA_COLLAPSE", character: "Arjuna", source: "Bhagavad Gita", event: "Collapses emotionally on the battlefield, physically unable to continue",
+    themes: ["burnout", "emotional-exhaustion", "collapse", "carrying-too-much"],
+    intents: ["Burnout"],
+    card_title: "Arjuna Sits Down",
+    card_story: "Arjuna was the warrior everyone was counting on. He had been preparing for this for years. And then he sat down in the middle of the battlefield and simply could not go on. His bow fell. His body trembled. He was genuinely empty — the kind of empty that comes from carrying too much for too long. Krishna didn't immediately push him to get up. He sat down beside him first.",
+    card_connect: "Burnout isn't a productivity problem. It's a signal that something important has run out. Sitting with that honestly is the first step — not pushing through it.",
+    teaching: "The collapse is not the end. It is the moment before something more honest begins.",
+  },
+  {
+    id: "YUDHISHTHIRA_EMPTY", character: "Yudhishthira", source: "Mahabharata", event: "Wins the war but feels only emptiness — cannot celebrate",
+    themes: ["emptiness", "hollow-victory", "post-achievement-loss"],
+    intents: ["Burnout"],
+    card_title: "Yudhishthira Refuses to Celebrate",
+    card_story: "Yudhishthira won the war and couldn't feel any joy. He sat in the ruins, exhausted in a way that victory couldn't fix. He didn't perform happiness. He stayed with the emptiness until something real came through.",
+    card_connect: "Sometimes exhaustion goes deeper than the body. When even achieving things feels hollow — that's a different kind of tired. It deserves honesty, not a pep talk.",
+    teaching: "The exhaustion that follows doing everything right is one of the loneliest feelings. It still deserves rest.",
+  },
+  {
+    id: "SHIVA_WITHDRAW", character: "Shiva", source: "Puranas", event: "Withdraws into deep meditation, unreachable by the world",
+    themes: ["withdrawal", "rest-as-power", "disengagement"],
+    intents: ["Burnout"],
+    card_title: "Shiva Disappears",
+    card_story: "When the world got too loud, Shiva retreated into the mountains and went silent. The texts don't frame this as escape. They frame it as a god who understood that stillness is its own kind of power. Not everything that stops is broken. Some things stop because they've reached the limit of what output without rest can produce.",
+    card_connect: "Stepping back completely isn't failure. It's sometimes the most honest response to having given everything.",
+    teaching: "Rest is not absence. It is the condition that makes return possible.",
+  },
+  {
+    id: "VISHWAMITRA_FAILURE", character: "Vishwamitra", source: "Valmiki Ramayana", event: "Fails repeatedly over years before achieving anything lasting",
+    themes: ["exhaustion", "repeated-failure", "starting-over"],
+    intents: ["Burnout"],
+    card_title: "Vishwamitra Burns Out Again and Again",
+    card_story: "Vishwamitra tried to force his way to greatness through sheer willpower. He failed. Burned out. Started over. Failed again. The texts spend more time on his exhaustion than his success — because that's where the real learning happened.",
+    card_connect: "Burning out doesn't mean you're not strong enough. It usually means you've been pushing at something that needs rest, not more effort.",
+    teaching: "Burnout is what happens when effort is not matched by rest. The body knows before the mind admits it.",
+  },
+  {
+    id: "KRISHNA_ACTION", character: "Krishna", source: "Bhagavad Gita", event: "Cuts through Arjuna's spiralling thoughts with a single grounding question",
+    themes: ["clarity", "action", "thought-loops-broken", "decisive"],
+    intents: ["Overthinking"],
+    card_title: "Krishna's One Question",
+    card_story: "Arjuna's mind ran everywhere at once — his teachers, his cousins, his guilt, his dharma. Krishna didn't tell him to stop thinking. He asked one question: what is actually yours to do right now? That question cut through everything.",
+    card_connect: "Overthinking usually means you're trying to solve everything at once. The question is only ever: what is mine to do right now?",
+    teaching: "One clear action chosen from your values is worth more than a thousand thoughts about every possible outcome.",
+  },
+  {
+    id: "ASHTAVAKRA_STILL", character: "Ashtavakra", source: "Ashtavakra Gita", event: "Points to the self that watches thought — already still, never caught in the loop",
+    themes: ["awareness", "watcher-self", "stillness-beneath-thought"],
+    intents: ["Overthinking"],
+    card_title: "Ashtavakra and the Stillness Beneath Thought",
+    card_story: "Ashtavakra was a sage who taught that the self watching the thoughts is always already still. The thoughts come and go. The one watching them doesn't move. He wasn't teaching detachment — he was pointing to something that was never caught in the loop to begin with.",
+    card_connect: "There is a part of you that is not inside the overthinking. It's the part noticing it. That part has never been tangled.",
+    teaching: "You are not your thoughts. You are the one watching them — and that watcher is already still.",
+  },
+  {
+    id: "NACHIKETA_CHOICE", character: "Nachiketa", source: "Katha Upanishad", event: "Rejects every temptation offered and waits three days in silence for what is real",
+    themes: ["clarity", "stillness", "refusing-noise"],
+    intents: ["Overthinking"],
+    card_title: "Nachiketa Stops Reaching for More",
+    card_story: "Nachiketa sat outside Death's door for three days with no food and no answer. When Death offered him wealth and pleasure instead of the truth he asked for, Nachiketa said no. He just wanted to know what was real. The mind can only find solid ground by going quiet — not by thinking harder.",
+    card_connect: "The mind keeps spinning because it's looking for solid ground. But some things can only be found by going quiet, not by adding more thoughts.",
+    teaching: "You cannot solve your way to peace. Stillness is not the absence of thought — it's the decision to stop feeding every one.",
+  },
+  {
+    id: "KARNA_LOYALTY", character: "Karna", source: "Mahabharata", event: "Rejects his birth mother's offer of family legitimacy to honour the loyalty he actually lived",
+    themes: ["loyalty", "chosen-bonds-over-blood", "integrity-under-pressure"],
+    intents: ["Family Pressure"],
+    card_title: "Karna Says No to His Mother",
+    card_story: "Just before the war, Karna's birth mother came to him with an offer — recognition, legitimacy, a place in the family — if he switched sides. He said no. He chose the loyalty he had actually lived, not the family he had been born into.",
+    card_connect: "Family obligation and your own integrity don't always point the same direction. You get to decide which one you live by.",
+    teaching: "The family you choose to honour through your actions matters as much as the family you were born into.",
+  },
+  {
+    id: "YUDHISHTHIRA_PRESSURE", character: "Yudhishthira", source: "Mahabharata", event: "Gambles the kingdom away under pressure of royal expectation and social convention",
+    themes: ["expectation", "unexamined-pressure", "social-obligation"],
+    intents: ["Family Pressure"],
+    card_title: "Yudhishthira and the Weight of Expectation",
+    card_story: "Yudhishthira was expected to be perfect — the eldest, the righteous one, the king everyone leaned on. The weight of that expectation eventually led him to make one of the worst decisions of his life. The Mahabharata doesn't excuse it, but it shows what unexamined pressure does.",
+    card_connect: "The pressure to be everything a family needs can quietly erode your own judgment. Noticing that pressure is the first step to not being completely shaped by it.",
+    teaching: "Expectation that is never examined often acts on you without your knowing. Naming it gives you back some choice.",
+  },
+  {
+    id: "GANDHARI_BLINDFOLD", character: "Gandhari", source: "Mahabharata", event: "Blindfolds herself for life upon marriage to a blind king — an act of choice or sacrifice",
+    themes: ["choice", "sacrifice", "compliance-or-solidarity", "family-obligation"],
+    intents: ["Family Pressure"],
+    card_title: "Gandhari Ties the Blindfold",
+    card_story: "Gandhari blindfolded herself when she married a blind king and wore that blindfold for the rest of her life. The texts never fully answer whether it was love, solidarity, or quiet protest. What's clear is that she chose it — and then lived entirely inside that choice. The Mahabharata pays attention to what that cost her.",
+    card_connect: "Sometimes the deepest family pressures are the ones you've already agreed to. The question isn't whether to comply — it's whether the choice was ever really examined.",
+    teaching: "The obligations that bind us most tightly are often ones we accepted in a single moment and never revisited.",
+  },
+  {
+    id: "DRAUPADI_HUMILIATION", character: "Draupadi", source: "Mahabharata", event: "Publicly humiliated in the royal court — calls out for justice alone",
+    themes: ["shame", "public-humiliation", "dignity-maintained", "justice-demanded"],
+    intents: ["Self-Worth & Shame"],
+    card_title: "Draupadi Calls Out",
+    card_story: "Draupadi was humiliated in front of an entire royal court. Every person she trusted looked away. She called out anyway. Years later she walked out of a war she never started, still herself.",
+    card_connect: "What happened to you is not who you are. The fact that you're still asking that question means your sense of self is still intact.",
+    teaching: "Shame belongs to the act, not to you.",
+  },
+  {
+    id: "SITA_REFUSAL", character: "Sita", source: "Valmiki Ramayana", event: "Refuses to undergo a second test of purity — walks away instead",
+    themes: ["self-worth", "not-proving-self", "dignity-over-approval"],
+    intents: ["Self-Worth & Shame"],
+    card_title: "Sita Stops Proving Herself",
+    card_story: "After years of captivity, war, and rescue — Sita was asked to prove herself one more time. She had given everything. She didn't fight or plead. She simply stopped. It was not defeat. It was a person who had nothing left to prove and knew it.",
+    card_connect: "There is a point where exhaustion isn't weakness. It's having genuinely given everything. That deserves to be named, not pushed through.",
+    teaching: "Knowing when you have given enough is its own kind of wisdom.",
+  },
+  {
+    id: "KARNA_INSULT", character: "Karna", source: "Mahabharata", event: "Insulted publicly before thousands at the tournament",
+    themes: ["shame", "public-insult", "standing-despite-mockery"],
+    intents: ["Self-Worth & Shame"],
+    card_title: "Karna Stands in the Court",
+    card_story: "Karna walked into a tournament and was publicly mocked — wrong birth, wrong caste, not allowed to compete. He stood there, insulted in front of thousands. He didn't collapse. He found another way to stand.",
+    card_connect: "Being dismissed or shamed by others doesn't settle the question of your worth. It just means they didn't look properly.",
+    teaching: "Worth built from what you know about yourself holds. Worth that depends on others' recognition is fragile.",
+  },
+  {
+    id: "SAVITRI_LOVE", character: "Savitri", source: "Mahabharata", event: "Follows death itself to bring her husband back — wins through persistence and clarity",
+    themes: ["love", "persistence", "choosing-someone-fully"],
+    intents: ["Relationship Issues"],
+    card_title: "Savitri Follows Death",
+    card_story: "Savitri's husband died and Death came to take him. She followed. She didn't beg or collapse — she walked with Death and spoke clearly, asking questions that showed she understood something about love that most people avoid. Death gave him back. The Mahabharata frames this not as miracle but as what clarity and commitment actually look like.",
+    card_connect: "The relationships that last are usually the ones where someone chose deliberately — not by default.",
+    teaching: "Love that is chosen fully, even when the cost is visible, is different from love that simply happened.",
+  },
+  {
+    id: "NALA_LOSS", character: "Nala", source: "Mahabharata", event: "Loses everything including wife due to a curse — and has to rebuild alone",
+    themes: ["loss", "separation", "rebuilding-after-rupture"],
+    intents: ["Relationship Issues", "Grief & Loss"],
+    card_title: "Nala and the Long Separation",
+    card_story: "Nala was a king who lost his kingdom, his wealth, and eventually his wife to a gambling curse. He wandered alone for years. He didn't stop loving her — but he had to learn how to stand again without her before the relationship could find its way back. The story doesn't rush the reunion.",
+    card_connect: "Some relationship pain isn't about what went wrong between two people. It's about what one or both people still need to become.",
+    teaching: "The work of returning to someone often requires first returning to yourself.",
+  },
+  {
+    id: "DRAUPADI_QUESTION", character: "Draupadi", source: "Mahabharata", event: "Questions the court — asking who had the right to stake her in the first place",
+    themes: ["conflict", "power-in-relationship", "being-seen", "justice"],
+    intents: ["Relationship Issues"],
+    card_title: "Draupadi Asks the Question No One Will Answer",
+    card_story: "When Yudhishthira gambled her away, Draupadi didn't stay silent. She asked the court a sharp legal question: can a man stake what he no longer owns? No one answered. The whole court went silent. The question itself was a form of power — even when no one responded.",
+    card_connect: "Sometimes in a relationship, the most important thing is asking the question clearly — even when you're not sure you'll get an answer.",
+    teaching: "Clarity about what you need and what you deserve is not the same as demanding it be given. One is always in your power.",
+  },
+  {
+    id: "LAKSHMAN_BOUNDARY", character: "Lakshman", source: "Valmiki Ramayana", event: "Draws a boundary line to protect Sita before he must leave",
+    themes: ["boundary", "protection", "care-through-limits"],
+    intents: ["Relationship Issues"],
+    card_title: "Lakshman Draws the Line",
+    card_story: "Before leaving Sita alone, Lakshman drew a line in the earth and asked her not to cross it. He couldn't stay — but he left what protection he could. The line wasn't about control. It was the most concrete form of care he could offer before having to go.",
+    card_connect: "Setting a boundary isn't always about saying no. Sometimes it's the most specific way of saying: I'm trying to protect what matters here.",
+    teaching: "Boundaries are a form of care, not a form of withdrawal.",
+  },
+  {
+    id: "SUGRIVA_TRUST", character: "Sugriva", source: "Valmiki Ramayana", event: "Trusts Rama's alliance despite past betrayal and fear of being deceived again",
+    themes: ["trust", "risk-of-trusting", "alliance-after-hurt"],
+    intents: ["Relationship Issues"],
+    card_title: "Sugriva Chooses to Trust",
+    card_story: "Sugriva had been betrayed by his own brother. When Rama offered an alliance, trusting anyone again was the hard part — not the practical agreement. He chose to trust anyway. The Ramayana doesn't pretend this was easy. It shows the step being taken before the outcome was known.",
+    card_connect: "Trusting someone after being hurt isn't naivety. It's a choice — and it can only be made before you know how it will go.",
+    teaching: "Trust is never risk-free. The question is whether the person and moment are worth the risk.",
+  },
+  {
+    id: "EKALAVYA_ALONE", character: "Ekalavya", source: "Mahabharata", event: "Practises alone for years with no teacher, no peers, no recognition",
+    themes: ["isolation", "self-directed", "no-witness", "practising-without-approval"],
+    intents: ["Loneliness"],
+    card_title: "Ekalavya Practises Alone",
+    card_story: "Ekalavya had no teacher, no classmates, no one watching. He practised every day in the forest. He became exceptional in complete isolation. The Mahabharata doesn't frame this as sad — it frames it as a different kind of strength. The kind that builds when there's no one to perform for.",
+    card_connect: "Loneliness is real. But sometimes what happens when no one is watching is exactly what can't happen any other way.",
+    teaching: "Some growth only comes in the absence of an audience.",
+  },
+  {
+    id: "URMILA_SILENT", character: "Urmila", source: "Valmiki Ramayana", event: "Stays alone in the palace for 14 years while Lakshman is in exile",
+    themes: ["loneliness", "invisible-sacrifice", "waiting-alone"],
+    intents: ["Loneliness"],
+    card_title: "Urmila's Silent Years",
+    card_story: "When Lakshman went to the forest with Rama, his wife Urmila stayed behind. She waited fourteen years. The Ramayana barely mentions her. Later traditions filled in the silence: she chose to sleep, so Lakshman could stay awake protecting Rama. Whether legend or invention, what's striking is that her sacrifice was completely invisible — and she made it anyway.",
+    card_connect: "Some of the loneliest positions are the ones where even the loneliness goes unnoticed.",
+    teaching: "Carrying something alone is hardest when no one knows you're carrying it.",
+  },
+  {
+    id: "KARNA_IDENTITY", character: "Karna", source: "Mahabharata", event: "Struggles his entire life with not knowing where he belongs or who he is",
+    themes: ["identity", "belonging", "between-worlds"],
+    intents: ["Identity Crisis"],
+    card_title: "Karna Between Two Worlds",
+    card_story: "Karna never fully belonged anywhere. Too noble for servants, too low-born for warriors, too loyal to switch sides. He spent his whole life between categories — known by everyone, claimed by no one. The Mahabharata gives more interior space to his identity struggle than almost any other character.",
+    card_connect: "Not knowing where you belong isn't a failure of self-knowledge. Sometimes it's an accurate description of a position the world hasn't made space for yet.",
+    teaching: "Identity doesn't come from finding the right category. It comes from deciding what you will stand for regardless.",
+  },
+  {
+    id: "ARJUNA_IDENTITY", character: "Arjuna", source: "Bhagavad Gita", event: "Questions his own role and nature when everything he was trained to be comes into conflict",
+    themes: ["identity", "role-confusion", "trained-self-vs-real-self"],
+    intents: ["Identity Crisis"],
+    card_title: "Arjuna Questions His Own Role",
+    card_story: "Arjuna had been trained as a warrior his entire life. And then the very skills he built his identity on became the source of the deepest moral crisis of his life. He didn't know if what he was — warrior, son, cousin — was the same as who he was. That gap is what the Gita tries to close.",
+    card_connect: "Identity confusion often comes when what you were trained to be starts conflicting with what you actually feel. That conflict is worth examining, not suppressing.",
+    teaching: "What you were built for and who you are are not always the same question.",
+  },
+  {
+    id: "SHIVA_ASCETIC", character: "Shiva", source: "Puranas", event: "Lives outside all social categories — neither householder nor renunciant, neither god nor human",
+    themes: ["identity", "outside-categories", "uncategorisable"],
+    intents: ["Identity Crisis"],
+    card_title: "Shiva Lives Outside Every Category",
+    card_story: "Shiva is the god the Puranas can't fully contain. He's an ascetic who marries. A destroyer who protects. He lives on cremation grounds, wears snakes, dances wildly. The texts don't resolve the contradiction — they celebrate it. His identity is precisely that he doesn't fit.",
+    card_connect: "The feeling of not fitting any category isn't always a problem to be solved. Sometimes it's the most honest description of who you actually are.",
+    teaching: "Some people are genuinely multiple things at once. The problem is usually the world's categories, not the person.",
+  },
+  {
+    id: "GANESHA_TRANSFORM", character: "Ganesha", source: "Puranas", event: "Gets his head replaced — emerges as something completely new",
+    themes: ["change", "transformation", "new-self-after-rupture"],
+    intents: ["Identity Crisis"],
+    card_title: "Ganesha Is Made New",
+    card_story: "Ganesha's head was cut off and replaced with an elephant's. The event is violent, sudden, and permanent. He didn't return to who he was before. He became something new — something that turned out to be stronger. The Puranas treat the transformation, not the loss, as the point.",
+    card_connect: "Sometimes the identity you lose was the threshold to the one you're actually becoming.",
+    teaching: "What you were before a rupture is not necessarily what you're meant to keep being after it.",
+  },
+  {
+    id: "DRAUPADI_VOW", character: "Draupadi", source: "Mahabharata", event: "Takes a vow of revenge after being publicly humiliated, keeping anger alive deliberately",
+    themes: ["anger", "righteous-fury", "resentment-as-fuel"],
+    intents: ["Anger & Resentment"],
+    card_title: "Draupadi's Vow",
+    card_story: "After her humiliation in the court, Draupadi left her hair loose and vowed she would not tie it up until it was washed in the blood of those who wronged her. She carried that anger for eighteen years through a war. The Mahabharata doesn't frame this as unhealthy. It frames it as a person who refused to let an injustice be forgotten.",
+    card_connect: "Anger that comes from real injustice is different from anger that comes from hurt pride. The Mahabharata took Draupadi's seriously.",
+    teaching: "Not every anger needs to be let go. Some needs to be understood first.",
+  },
+  {
+    id: "PARASHURAMA_RAGE", character: "Parashurama", source: "Mahabharata", event: "Acts in rage after his father's murder — the anger shapes everything that follows",
+    themes: ["anger", "rage-acted-on", "grief-beneath-anger"],
+    intents: ["Anger & Resentment"],
+    card_title: "Parashurama's Rage",
+    card_story: "Parashurama's father was killed. He didn't wait or grieve quietly. He acted from pure rage. The Mahabharata shows what that rage produced — and the costs. The anger was real and the cause was real. But acting entirely from it, without the grief underneath it being named, cost more than he knew in advance.",
+    card_connect: "Anger that isn't connected to the grief beneath it often acts before it understands what it's actually trying to fix.",
+    teaching: "The need underneath anger is almost always simpler and sadder than the anger itself.",
+  },
+  {
+    id: "RAMA_GRIEF", character: "Rama", source: "Valmiki Ramayana", event: "Searches for Sita with open, visible grief — doesn't suppress it",
+    themes: ["grief", "searching", "love-and-loss"],
+    intents: ["Grief & Loss"],
+    card_title: "Rama Searches",
+    card_story: "When Sita was taken, Rama didn't stay composed. He wept openly. He spoke to trees and rivers asking if they'd seen her. The Ramayana doesn't treat this as weakness in a god. It treats it as what love looks like when something is genuinely lost.",
+    card_connect: "Grief that is visible isn't a breakdown. It's an honest response to something that mattered.",
+    teaching: "The person who grieves openly is not weaker than the person who suppresses it. Often they're more honest.",
+  },
+  {
+    id: "KUNTI_GRIEF", character: "Kunti", source: "Mahabharata", event: "Reveals the truth about Karna being her son — only after he is dead",
+    themes: ["grief", "secret-carried-too-long", "too-late"],
+    intents: ["Grief & Loss"],
+    card_title: "Kunti Tells the Truth Too Late",
+    card_story: "Kunti knew Karna was her son and said nothing for decades. She watched him be humiliated, excluded, and eventually killed. At his funeral she revealed the truth. The Mahabharata doesn't spare her from the weight of that timing. The grief she carried wasn't only for his death — it was for all the years before it.",
+    card_connect: "Some grief comes from loss. Some comes from the time that passed before you said what needed to be said.",
+    teaching: "The grief of what went unsaid is often heavier than the grief of loss itself.",
+  },
+  {
+    id: "YUDHISHTHIRA_DHARMA", character: "Yudhishthira", source: "Mahabharata", event: "Refuses to lie even in battle when truth could save lives — holds to dharma at enormous cost",
+    themes: ["integrity", "values-under-pressure", "cost-of-honesty"],
+    intents: ["Life Direction", "Family Pressure"],
+    card_title: "Yudhishthira Cannot Lie",
+    card_story: "During the war, Krishna asked Yudhishthira to say Ashwatthama was dead — just once, as strategy. Yudhishthira could not do it fully. He said the words but softened them. It cost the battle a critical advantage. The Mahabharata doesn't applaud or condemn him. It just shows what it looks like to be someone who cannot cross certain lines, even when everyone else needs you to.",
+    card_connect: "Living by values is rarely clean. Sometimes the cost of not compromising is visible and immediate.",
+    teaching: "Integrity under pressure is not the same as rigidity. But they can look identical from the outside.",
+  },
+  {
+    id: "DRAUPADI_RESILIENCE", character: "Draupadi", source: "Mahabharata", event: "Emerges from 13 years of exile, humiliation, and war still fully herself",
+    themes: ["resilience", "self-intact-after-everything", "not-broken"],
+    intents: ["Self-Worth & Shame", "Identity Crisis"],
+    card_title: "Draupadi After Everything",
+    card_story: "By the end of the Mahabharata, Draupadi had been humiliated, exiled, ignored, and widowed. And yet the texts never show her as a reduced version of herself. She's the same person she was at the beginning — just harder-won. The Mahabharata's most complete character arc belongs to someone who was treated as property.",
+    card_connect: "What you've been through doesn't have to become what you are. Some people go through more and come out more themselves, not less.",
+    teaching: "Resilience isn't returning to who you were. It's remaining recognisably yourself through what tried to change you.",
+  },
+  {
+    id: "HANUMAN_SERVICE", character: "Hanuman", source: "Valmiki Ramayana", event: "Chooses total dedication to Rama's purpose — finds complete freedom in it",
+    themes: ["purpose-through-service", "commitment", "freedom-in-dedication"],
+    intents: ["Life Direction"],
+    card_title: "Hanuman Finds Freedom in Commitment",
+    card_story: "Hanuman had enormous power — the ability to change form, cross oceans, move mountains. He gave all of it to Rama's service. The Ramayana doesn't frame this as self-erasure. It frames it as the moment his power found its full expression. Not constraint, but direction.",
+    card_connect: "Sometimes the confusion about what to do resolves when you find something worth giving yourself to completely.",
+    teaching: "Purpose isn't something you find by searching inward indefinitely. Sometimes it's something you find by committing outward.",
+  },
+  {
+    id: "SITA_EARTH", character: "Sita", source: "Valmiki Ramayana", event: "Asks the earth to take her back — refuses to be tested again",
+    themes: ["enough-given", "refusing-further-proof", "dignity-over-belonging"],
+    intents: ["Self-Worth & Shame", "Anger & Resentment"],
+    card_title: "Sita Returns to the Earth",
+    card_story: "When asked to prove her purity a second time, Sita asked the earth to take her back. The earth opened. She went. The Ramayana treats this as her choice — not defeat. She had proven herself once. She had nothing more to demonstrate to people who would keep asking. She left with her dignity intact.",
+    card_connect: "There is a point where continuing to prove yourself is the wrong move. Not every demand for proof deserves an answer.",
+    teaching: "Walking away from people who keep moving the standard isn't giving up. It's recognising the game.",
+  },
+  {
+    id: "BHIMA_GRIEF", character: "Bhima", source: "Mahabharata", event: "Carries grief as physical weight — the most emotional of the Pandava brothers",
+    themes: ["grief", "emotion-as-strength", "feeling-fully"],
+    intents: ["Grief & Loss"],
+    card_title: "Bhima Feels Everything",
+    card_story: "Bhima was the strongest of the Pandavas and the most openly emotional. He wept for people. He carried grief in his body. The Mahabharata never treats his emotional expression as weakness — it treats it as what real presence in the world looks like when you actually let things matter to you.",
+    card_connect: "Feeling things fully — including grief — isn't a problem to manage. It's what happens when you've actually invested in something.",
+    teaching: "The person who feels deeply is not weaker. They are more present.",
+  },
+  {
+    id: "YUDHISTHIRA_DOG", character: "Yudhishthira", source: "Mahabharata", event: "Refuses to enter heaven without his dog — the one companion who stayed loyal",
+    themes: ["loyalty", "refusing-partial-good", "values-at-final-threshold"],
+    intents: ["Relationship Issues", "Life Direction"],
+    card_title: "Yudhishthira and the Dog",
+    card_story: "At the gates of heaven, Yudhishthira was told he could enter — but not with the dog that had followed him through every loss. He refused. He had given up everything else. He would not give up the one who had stayed. The Mahabharata reveals it was a god testing him. But his answer came before he knew that.",
+    card_connect: "The relationships that lasted through everything are not always the ones others understand. Sometimes the simplest loyalty is the most important one to keep.",
+    teaching: "What you're willing to give up at the final threshold reveals what you actually value.",
+  },
 ];
 
-const VAGUE_FIRST_MESSAGE_PATTERNS = [
-  /^(hi|hello|hey|namaste|hii+|yo|hola)[\s.!]*$/i,
-  /^(help|help me|idk|i don't know|not sure|nothing|idk what to say)[\s.!?]*$/i,
-  /^[\s\S]{0,10}$/,
-];
+// ─────────────────────────────────────────────────────────────────────────────
+//  SCORING FUNCTION
+// ─────────────────────────────────────────────────────────────────────────────
 
-const OUT_OF_SCOPE_TOPICS = [
-  "stock market", "crypto", "bitcoin", "recipe", "cooking",
-  "weather forecast", "sports score", "cricket score", "coding help",
-  "programming error", "math problem", "homework", "breaking news",
-  "movie recommendation", "product recommendation",
-];
+function scoreEvent(event, intent, themes, recentEventIds, recentChars) {
+  let score = 0;
+  if (event.intents.includes(intent)) score += 50;
+  const overlap = event.themes.filter(t => themes.includes(t)).length;
+  score += overlap * 10;
+  if (recentEventIds.includes(event.id)) score -= 100;
+  if (recentChars.includes(event.character)) score -= 20;
+  return score;
+}
 
-const SAFETY_RESPONSE = {
-  reply: "What you are holding right now sounds incredibly heavy — and you do not have to carry it alone.\n\nPlease reach out to someone who can truly be with you:\n\niCall (India): 9152987821\nVandrevala Foundation (24/7): 1860-2662-345\nAASRA: 9820466627\nInternational: https://www.iasp.info/resources/Crisis_Centres/\n\nYou matter. Your life matters. A real human voice is what you need right now — please reach out.",
-  meta: { mode: "safety", severity: "L4", intent: "Crisis", is_safety: true, mythology_card: null },
+// ─────────────────────────────────────────────────────────────────────────────
+//  THEME HINTS
+// ─────────────────────────────────────────────────────────────────────────────
+
+const INTENT_THEME_HINTS = {
+  "Career Confusion": ["rejection", "identity", "self-made", "alternative-path", "reinvention"],
+  "Life Direction": ["values", "purpose", "duty", "clarity-sought", "truth-seeking"],
+  "Anxiety & Fear": ["fear", "self-doubt", "inner-anchor", "courage", "forgotten-strength"],
+  "Burnout": ["burnout", "exhaustion", "collapse", "withdrawal", "rest-as-power"],
+  "Overthinking": ["clarity", "stillness", "thought-loops-broken", "watcher-self"],
+  "Family Pressure": ["expectation", "loyalty", "integrity-under-pressure", "chosen-bonds-over-blood"],
+  "Self-Worth & Shame": ["shame", "dignity-maintained", "self-worth", "not-proving-self"],
+  "Grief & Loss": ["grief", "loss", "love-and-loss", "too-late", "searching"],
+  "Relationship Issues": ["trust", "boundary", "conflict", "love", "power-in-relationship"],
+  "Loneliness": ["isolation", "no-witness", "invisible-sacrifice"],
+  "Loneliness & Isolation": ["isolation", "no-witness", "invisible-sacrifice"],
+  "Identity Crisis": ["identity", "between-worlds", "transformation", "uncategorisable"],
+  "Anger & Resentment": ["anger", "righteous-fury", "grief-beneath-anger"],
+  "Gratitude & Positive Sharing": ["purpose-through-service", "freedom-in-dedication"],
 };
 
-
 // ─────────────────────────────────────────────────────────────────────────────
-//  SECTION 5 — SAFE JSON PARSE
-//  Finds the first complete {...} block in the string. No regex stripping.
+//  LLM STORY GENERATION PROMPT
 // ─────────────────────────────────────────────────────────────────────────────
 
-function safeParseIntent(raw) {
-  const FALLBACK = {
-    primary_intent:   "Life Direction",
-    secondary_intent: "",
-    severity:         "L2",
-    emotion:          "uncertain",
-    clarity:          "clear",
-    cultural_context: "general",
-  };
-  if (!raw || typeof raw !== "string") return FALLBACK;
-  const start = raw.indexOf("{");
-  const end   = raw.lastIndexOf("}");
-  if (start === -1 || end === -1 || end <= start) return FALLBACK;
+function buildMythGenerationPrompt(event, intent, emotion) {
+  return `You are the mythology storyteller for Ananda, an Indian-mythology-grounded mental wellness thinking partner.
+
+TASK: Rewrite the story below into a warm, specific card for a user feeling "${emotion || "uncertain"}" around the theme of "${intent}".
+
+STRICT RULES:
+- Do NOT invent new facts, plot points, or characters
+- Do NOT add modern interpretations not grounded in the original
+- Do NOT use these banned words/phrases: "journey", "anchor", "resonate", "navigate", "sit with", "hold space", "transformative", "profound", "paradigm", "illuminate"
+- Keep card_story to 4-6 sentences max — specific and concrete
+- card_connect must link directly to the user's emotional context ("${intent}" / "${emotion}")
+- teaching must be one sentence — a principle, not an affirmation
+- Return ONLY valid JSON — no markdown, no backticks, no explanation
+
+SOURCE EVENT:
+Character: ${event.character}
+Source: ${event.source}
+Event: ${event.event}
+
+CURRENT CARD (rewrite this, keeping the same facts):
+card_title: ${event.card_title}
+card_story: ${event.card_story}
+card_connect: ${event.card_connect}
+teaching: ${event.teaching}
+
+Return JSON with exactly these fields:
+{"card_title":"","card_story":"","card_connect":"","teaching":""}`;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  MYTHOLOGY CARD SELECTOR
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function selectMythologyCard({
+  openai,
+  intent,
+  emotion = "uncertain",
+  show = true,
+  recentIds = [],
+  recentChars = [],
+  themes = [],
+}) {
+  if (!show) return null;
+
+  const effectiveThemes = themes.length > 0
+    ? themes
+    : (INTENT_THEME_HINTS[intent] || []);
+
+  const scored = STORY_EVENTS.map(event => ({
+    event,
+    score: scoreEvent(event, intent, effectiveThemes, recentIds, recentChars),
+  }));
+
+  scored.sort((a, b) => b.score - a.score);
+
+  const best = scored[0];
+  if (!best) return null;
+
+  const event = best.event;
+
   try {
-    const parsed = JSON.parse(raw.slice(start, end + 1));
-    return {
-      primary_intent:   String(parsed.primary_intent   || FALLBACK.primary_intent),
-      secondary_intent: String(parsed.secondary_intent || ""),
-      severity:         String(parsed.severity         || FALLBACK.severity),
-      emotion:          String(parsed.emotion          || FALLBACK.emotion),
-      clarity:          String(parsed.clarity          || "clear"),
-      cultural_context: String(parsed.cultural_context || "general"),
-    };
+    const genRes = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [{ role: "user", content: buildMythGenerationPrompt(event, intent, emotion) }],
+      temperature: 0.6,
+      max_tokens: 400,
+    });
+
+    const raw = genRes.choices[0]?.message?.content || "";
+    const start = raw.indexOf("{");
+    const end = raw.lastIndexOf("}");
+    if (start !== -1 && end > start) {
+      const parsed = JSON.parse(raw.slice(start, end + 1));
+      if (parsed.card_title && parsed.card_story && parsed.card_connect && parsed.teaching) {
+        return {
+          id: event.id,
+          character: event.character,
+          source: event.source,
+          event: event.event,
+          card_title: String(parsed.card_title),
+          card_story: String(parsed.card_story),
+          card_connect: String(parsed.card_connect),
+          teaching: String(parsed.teaching),
+          _generated: true,
+        };
+      }
+    }
+  } catch (_err) {
+    // LLM failure — fall through to static fallback
+  }
+
+  return {
+    id: event.id,
+    character: event.character,
+    source: event.source,
+    event: event.event,
+    card_title: event.card_title,
+    card_story: event.card_story,
+    card_connect: event.card_connect,
+    teaching: event.teaching,
+    _generated: false,
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  SESSION MEMORY
+// ─────────────────────────────────────────────────────────────────────────────
+
+const SESSION_MEMORY_THRESHOLD = 4;
+
+async function buildSessionSummary(openai, history) {
+  if (!Array.isArray(history) || history.length < 8) return null;
+  const snippet = history.slice(-12).map(m => `${m.role === "user" ? "User" : "Solace"}: ${(m.content || "").slice(0, 200)}`).join("\n");
+  try {
+    const res = await openai.chat.completions.create({
+      model: "gpt-4o-mini", temperature: 0.4, max_tokens: 200,
+      messages: [{ role: "user", content: `You are a compassionate note-taker for a mental wellness conversation.\nBased on the exchange below, write exactly 3 short bullet points (each under 12 words) summarising:\n1. What the person has been feeling or dealing with\n2. The core tension or question underneath it\n3. One thing that seems to matter most to them right now\n\nRules:\n- Each bullet starts with "–"\n- Plain language, no therapy jargon\n- No advice, no affirmations\n- Return ONLY the 3 bullets, nothing else\n\nConversation:\n${snippet}` }],
+    });
+    const raw = (res.choices[0]?.message?.content || "").trim();
+    const bullets = raw.split("\n").filter(l => l.trim().startsWith("–"));
+    if (bullets.length >= 3) return bullets.slice(0, 3).join("\n");
+    return null;
+  } catch { return null; }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  REFLECTION SUMMARY
+// ─────────────────────────────────────────────────────────────────────────────
+
+const REFLECTION_INTERVAL = 6;
+
+async function buildReflectionSummary(openai, history, intent) {
+  if (!Array.isArray(history) || history.length < 10) return null;
+  const userMessages = history.filter(m => m.role === "user").slice(-6).map(m => (m.content || "").slice(0, 180)).join(" | ");
+  try {
+    const res = await openai.chat.completions.create({
+      model: "gpt-4o-mini", temperature: 0.5, max_tokens: 120,
+      messages: [{ role: "user", content: `You are Ananda, a warm thinking partner.\nWrite a 2-sentence reflection that mirrors back what the user has been sharing — no advice, no questions, just honest witnessing.\n\nStart with: "Here's what I'm hearing from you…"\nSentence 1: Name what they've been feeling or dealing with, using their own words where possible.\nSentence 2: Name the deeper thing underneath — the real weight of it.\n\nCurrent intent theme: ${intent}\nUser messages: ${userMessages}\n\nReturn only the 2 sentences. Nothing else.` }],
+    });
+    const raw = (res.choices[0]?.message?.content || "").trim();
+    if (raw.length > 20) return raw;
+    return null;
+  } catch { return null; }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  WRAP CARD
+// ─────────────────────────────────────────────────────────────────────────────
+
+const WRAP_MIN_TURNS = 6;
+
+const CLOSING_PATTERNS = [
+  /thank(s| you)/i, /that('s| is) (helpful|really helpful|good|great|useful)/i,
+  /i feel (better|clearer|lighter)/i, /this (helped|was helpful|makes sense)/i,
+  /okay(\s|,)?\s*(i('ll| will)|let me)/i, /i think i (get it|understand|need to)/i,
+  /good(bye|night)/i, /talk (later|soon)/i, /i('ll| will) (think about|try|reflect)/i,
+];
+
+function isConversationClosing(message) {
+  return CLOSING_PATTERNS.some(p => p.test(message));
+}
+
+async function buildWrapCard(openai, history, intent, mythCard) {
+  const userMessages = history.filter(m => m.role === "user").map(m => (m.content || "").slice(0, 150)).join(" | ");
+  try {
+    const res = await openai.chat.completions.create({
+      model: "gpt-4o-mini", temperature: 0.5, max_tokens: 250,
+      messages: [{ role: "user", content: `You are Ananda, a warm thinking partner ending a conversation.\nGenerate a closing wrap card. Return ONLY valid JSON with exactly these fields:\n{\n  "summary": "2 sentences. What was explored today. Plain, honest, no jargon.",\n  "question_to_sit_with": "One open, specific question they can carry with them. Not generic. Based on what they shared."\n}\n\nIntent theme: ${intent}\nUser shared: ${userMessages}\nMythology story shown: ${mythCard?.card_title || "none"}\n\nJSON only:` }],
+    });
+    const raw = res.choices[0]?.message?.content || "";
+    const start = raw.indexOf("{");
+    const end = raw.lastIndexOf("}");
+    if (start !== -1 && end > start) {
+      const parsed = JSON.parse(raw.slice(start, end + 1));
+      if (parsed.summary && parsed.question_to_sit_with) {
+        return { summary: String(parsed.summary), question_to_sit_with: String(parsed.question_to_sit_with), mythology_title: mythCard?.card_title || null };
+      }
+    }
+    return null;
+  } catch { return null; }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  CROSS-SESSION MEMORY
+// ─────────────────────────────────────────────────────────────────────────────
+
+const _memoryStore = new Map();
+
+async function loadMemory(userId) {
+  if (!userId) return null;
+  return _memoryStore.get(String(userId)) || null;
+}
+
+async function updateMemory(userId, { intent, history, openai }) {
+  if (!userId) return;
+  const key = String(userId);
+  const existing = _memoryStore.get(key) || { summary: "", themes: [], keywords: [], lastIntent: "", sessionCount: 0, updatedAt: "" };
+  const userMessages = (history || []).filter(m => m.role === "user").map(m => (m.content || "").slice(0, 200)).join(" | ");
+  if (!userMessages) return;
+  const updatedThemes = existing.themes.includes(intent) ? existing.themes : [...existing.themes, intent].slice(-8);
+  try {
+    const res = await openai.chat.completions.create({
+      model: "gpt-4o-mini", temperature: 0.3, max_tokens: 200,
+      messages: [{ role: "user", content: `You are building a compact memory record for a returning user of a mental wellness app called Solace.\n\nBased on what they shared in this session, generate a memory update. Return ONLY valid JSON:\n{\n  "summary": "2 plain sentences summarising what they've been working through overall. Present tense. No jargon.",\n  "keywords": ["3 to 6 specific words or short phrases the person keeps coming back to — their actual language, not clinical terms"]\n}\n\nTheir previous summary (may be empty): "${existing.summary}"\nWhat they shared this session: ${userMessages}\nMain theme this session: ${intent}\n\nJSON only:` }],
+    });
+    const raw = res.choices[0]?.message?.content || "";
+    const start = raw.indexOf("{");
+    const end = raw.lastIndexOf("}");
+    if (start !== -1 && end > start) {
+      const parsed = JSON.parse(raw.slice(start, end + 1));
+      _memoryStore.set(key, {
+        summary: String(parsed.summary || existing.summary),
+        themes: updatedThemes,
+        keywords: Array.isArray(parsed.keywords) ? [...new Set([...existing.keywords, ...parsed.keywords])].slice(-12) : existing.keywords,
+        lastIntent: intent, sessionCount: existing.sessionCount + 1, updatedAt: new Date().toISOString(),
+      });
+    }
   } catch {
-    return FALLBACK;
+    _memoryStore.set(key, { ...existing, themes: updatedThemes, lastIntent: intent, sessionCount: existing.sessionCount + 1, updatedAt: new Date().toISOString() });
   }
 }
 
+function formatMemoryForPrompt(memory) {
+  if (!memory || !memory.summary) return "";
+  const parts = [`RETURNING USER — session ${memory.sessionCount + 1}.`];
+  if (memory.summary) parts.push(`What they've been working through: ${memory.summary}`);
+  if (memory.themes?.length) parts.push(`Recurring themes: ${memory.themes.slice(-4).join(", ")}`);
+  if (memory.keywords?.length) parts.push(`Words they return to: ${memory.keywords.slice(-6).join(", ")}`);
+  if (memory.lastIntent) parts.push(`Last session focus: ${memory.lastIntent}`);
+  return parts.join("\n");
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  SECTION 6 — RECURRING PATTERN DETECTION
-//  Counts how many prior user messages match the current intent's markers.
-//  Returns true if 3 or more user messages share the same theme.
-//  No keyword frequency spam — each message counts as 1.
+//  CONTEXTUAL FOLLOW-UP QUESTIONS
 // ─────────────────────────────────────────────────────────────────────────────
 
-const INTENT_MARKERS = {
-  "Career Confusion":       ["job", "career", "work", "role", "quit", "resign", "promotion", "office"],
-  "Life Direction":         ["direction", "path", "future", "lost", "confused", "what to do", "don't know"],
-  "Anxiety & Fear":         ["anxious", "anxiety", "worried", "fear", "scared", "panic", "nervous"],
-  "Burnout":                ["burnout", "exhausted", "drained", "tired", "no energy", "depleted"],
-  "Overthinking":           ["overthinking", "loop", "circles", "can't stop thinking", "spinning"],
-  "Family Pressure":        ["family", "parents", "mom", "dad", "pressure", "expectation", "marriage"],
-  "Relationship Issues":    ["relationship", "partner", "girlfriend", "boyfriend", "friend", "breakup"],
-  "Loneliness & Isolation": ["lonely", "alone", "isolated", "no one", "disconnected", "invisible"],
-  "Identity Crisis":        ["identity", "who am i", "lost myself", "purpose", "meaning", "don't know who"],
-  "Self-Worth & Shame":     ["failure", "worthless", "not enough", "shame", "embarrassed", "loser"],
-  "Anger & Resentment":     ["angry", "anger", "resentment", "bitter", "frustrated", "furious"],
-  "Grief & Loss":           ["grief", "loss", "miss", "death", "lost someone", "breakup", "gone"],
+async function buildContextualQuestion(openai, history, intent, currentMessage, memory = null) {
+  if (!Array.isArray(history) || history.length < 2) return null;
+  const recentUserMessages = history.filter(m => m.role === "user").slice(-4).map(m => (m.content || "").slice(0, 200)).join("\n");
+  const memoryContext = memory ? formatMemoryForPrompt(memory) : "";
+  try {
+    const res = await openai.chat.completions.create({
+      model: "gpt-4o-mini", temperature: 0.6, max_tokens: 80,
+      messages: [{ role: "user", content: `You are crafting a single follow-up question for a mental wellness thinking partner called Solace.\n\nThe question must:\n- Reference something SPECIFIC the person said (a word, situation, or detail they actually mentioned)\n- Target the gap, decision, or unspoken thing underneath their words\n- Feel like it comes from genuine curiosity, not a checklist\n- Be one sentence. No preamble. No "I'm curious" or "Can I ask"\n- NOT be answerable with yes/no\n- NOT be generic ("How does that make you feel?" is banned)\n\nIntent theme: ${intent}\n${memoryContext ? `User context from previous sessions:\n${memoryContext}\n` : ""}Recent messages from this conversation:\n${recentUserMessages}\n\nCurrent message: "${currentMessage}"\n\nReturn ONLY the question text. Nothing else.` }],
+    });
+    const q = (res.choices[0]?.message?.content || "").trim();
+    if (q.includes("?") && q.split(" ").length <= 25) return q;
+    return null;
+  } catch { return null; }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  REFLECTION REPORT
+// ─────────────────────────────────────────────────────────────────────────────
+
+function shouldGenerateReflectionReport({ history, intentHistory }) {
+  const userMessages = history.filter(h => h.role === "user");
+  const messageCount = userMessages.length;
+  if (messageCount < 6) return false;
+  const avgLength = userMessages.reduce((acc, h) => acc + (h.content || "").split(" ").length, 0) / messageCount;
+  if (avgLength < 12) return false;
+  if (Array.isArray(intentHistory) && intentHistory.length >= 3) {
+    const last3 = intentHistory.slice(-3);
+    if (last3.length === 3 && new Set(last3).size === 1) return true;
+  }
+  if (!Array.isArray(intentHistory) || intentHistory.length === 0) return false;
+  const freq = {};
+  intentHistory.forEach(i => { freq[i] = (freq[i] || 0) + 1; });
+  const maxIntentCount = Math.max(...Object.values(freq));
+  const consistency = maxIntentCount / intentHistory.length;
+  if (consistency < 0.6) return false;
+  return true;
+}
+
+async function generateReflectionReport(openai, history) {
+  const conversationText = history.slice(-20).map(m => `${m.role === "user" ? "User" : "Solace"}: ${(m.content || "").slice(0, 300)}`).join("\n");
+  try {
+    const res = await openai.chat.completions.create({
+      model: "gpt-4o-mini", temperature: 0.5, max_tokens: 500,
+      messages: [{ role: "user", content: `You are an emotionally intelligent reflection system.\n\nAnalyze the conversation and identify:\n\n1. Patterns in thinking\n2. Emotional tendencies\n3. Core internal tension\n4. Dominant life theme\n5. A meaningful reflection summary\n6. One question for the user\n\nRules:\n- Do NOT give advice\n- Do NOT sound like a therapist\n- Be observational, not prescriptive\n- Keep tone calm and neutral\n- patterns: array of 2-4 short plain-language strings (each under 12 words)\n- core_tension: one clear sentence naming the central conflict\n- emotional_trend: one sentence describing the emotional pattern across messages\n- dominant_theme: 3-5 words — the overarching theme\n- reflection_summary: 2-3 sentences synthesising what's really happening beneath the surface\n- next_question: one open, specific question to sit with — not generic\n\nReturn ONLY valid JSON, no markdown, no explanation:\n\n{\n  "patterns": [],\n  "core_tension": "",\n  "emotional_trend": "",\n  "dominant_theme": "",\n  "reflection_summary": "",\n  "next_question": ""\n}\n\nConversation:\n${conversationText}` }],
+    });
+    const raw = res.choices[0]?.message?.content || "";
+    const start = raw.indexOf("{");
+    const end = raw.lastIndexOf("}");
+    if (start === -1 || end <= start) return null;
+    const parsed = JSON.parse(raw.slice(start, end + 1));
+    if (
+      Array.isArray(parsed.patterns) && parsed.patterns.length > 0 &&
+      typeof parsed.core_tension === "string" && parsed.core_tension.trim() &&
+      typeof parsed.emotional_trend === "string" && parsed.emotional_trend.trim() &&
+      typeof parsed.dominant_theme === "string" && parsed.dominant_theme.trim() &&
+      typeof parsed.reflection_summary === "string" && parsed.reflection_summary.trim() &&
+      typeof parsed.next_question === "string" && parsed.next_question.trim()
+    ) {
+      return {
+        patterns: parsed.patterns.map(p => String(p)),
+        core_tension: String(parsed.core_tension),
+        emotional_trend: String(parsed.emotional_trend),
+        dominant_theme: String(parsed.dominant_theme),
+        reflection_summary: String(parsed.reflection_summary),
+        next_question: String(parsed.next_question),
+      };
+    }
+    return null;
+  } catch { return null; }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  PROGRESS OVER TIME
+// ─────────────────────────────────────────────────────────────────────────────
+
+const userProgressStore = {};
+
+function storeProgressEntry(userId, reflectionReport) {
+  if (!userId || !reflectionReport) return;
+  if (!userProgressStore[userId]) userProgressStore[userId] = { sessions: [] };
+  userProgressStore[userId].sessions.push({
+    date: Date.now(),
+    dominant_theme: reflectionReport.dominant_theme || "",
+    emotional_trend: reflectionReport.emotional_trend || "",
+    patterns: Array.isArray(reflectionReport.patterns) ? reflectionReport.patterns : [],
+  });
+}
+
+function generateProgressInsights(userId) {
+  const sessions = userProgressStore[userId]?.sessions || [];
+  if (sessions.length < 2) return null;
+  const themeCount = {};
+  sessions.forEach(s => { if (s.dominant_theme) themeCount[s.dominant_theme] = (themeCount[s.dominant_theme] || 0) + 1; });
+  const dominantRecurringTheme = Object.keys(themeCount).sort((a, b) => themeCount[b] - themeCount[a])[0] || "";
+  const recentEmotionalTrend = sessions[sessions.length - 1].emotional_trend || "";
+  return {
+    session_count: sessions.length,
+    recurring_theme: dominantRecurringTheme,
+    recent_emotional_trend: recentEmotionalTrend,
+    progress_summary: dominantRecurringTheme
+      ? `You've been revisiting ${dominantRecurringTheme} across sessions.`
+      : "You've been showing up consistently.",
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  EXPORTS
+// ─────────────────────────────────────────────────────────────────────────────
+
+export {
+  STORY_EVENTS, scoreEvent, selectMythologyCard, INTENT_THEME_HINTS,
+  buildSessionSummary, buildReflectionSummary, buildWrapCard, isConversationClosing,
+  SESSION_MEMORY_THRESHOLD, REFLECTION_INTERVAL, WRAP_MIN_TURNS,
+  loadMemory, updateMemory, formatMemoryForPrompt, buildContextualQuestion,
+  shouldGenerateReflectionReport, generateReflectionReport,
+  userProgressStore, storeProgressEntry, generateProgressInsights,
 };
 
-function detectRecurringPattern(history, currentIntent) {
-  if (!Array.isArray(history) || history.length < 4) return false;
-  const markers = INTENT_MARKERS[currentIntent];
-  if (!markers || markers.length === 0) return false;
-  const userMessages = history.filter(m => m.role === "user").map(m => (m.content || "").toLowerCase());
-  // Count messages (not keyword hits) — each message is 1
-  const matchingMessages = userMessages.filter(msg => markers.some(kw => msg.includes(kw)));
-  return matchingMessages.length >= 3;
-}
-
-
 // ─────────────────────────────────────────────────────────────────────────────
-//  SECTION 7 — INTENT CLASSIFICATION PROMPT
-// ─────────────────────────────────────────────────────────────────────────────
-
-function buildClassificationPrompt(message, historySnippet) {
-  return `You are a precise psychological intent classifier for Ananda, an Indian-mythology-grounded mental wellness chatbot.
-Classify the user message. Return ONLY a valid JSON object. No markdown. No backticks. No explanation.
-
-Required output (all fields mandatory):
-{"primary_intent":"","secondary_intent":"","severity":"L1","emotion":"","clarity":"clear","cultural_context":"general"}
-
-INTENT OPTIONS:
-Career Confusion = stuck or confused at work, wrong job, no growth, career decisions
-Life Direction = confused about life path, torn between choices, don't know what to do next
-Anxiety & Fear = worried, scared, anxious about something specific or general
-Burnout = exhausted, nothing left to give, drained, can't continue at current pace
-Overthinking = going in circles mentally, same thoughts repeating, can't stop the loop
-Family Pressure = pressure from parents or family, expectations, obligation, guilt
-Self-Worth & Shame = feeling like a failure, not good enough, shame, comparison
-Grief & Loss = lost someone or something, mourning, breakup loss, old wounds resurfacing
-Relationship Issues = problems with partner or friend, feeling unseen or hurt
-Loneliness & Isolation = feeling alone, disconnected, no one understands
-Identity Crisis = don't know who I am, lost sense of self, questioning meaning and purpose
-Anger & Resentment = angry, bitter, resentful, frustrated at person or situation
-Crisis = suicidal ideation, self-harm, wanting to die — ONLY use this intent
-Gratitude & Positive Sharing = sharing good news, gratitude, positive update
-Out-of-Scope = weather, sports, coding, recipes, factual questions with no emotional weight
-
-SEVERITY:
-L1 = mild or practical question, low emotional weight ("should I take a break?", "should I see a counsellor?")
-L2 = moderate distress, emotionally heavy but functional, stuck
-L3 = high distress, overwhelmed, explicit pain, hopelessness, crying
-NOTE: Short questions and practical dilemmas are L1. Reserve L3 for explicit overwhelm.
-
-cultural_context = "indian" only if they mention Indian family dynamics, arranged marriage, societal pressure, log kya kahenge. Otherwise "general".
-secondary_intent = next most relevant intent, or empty string.
-clarity = "vague" only if intent is genuinely impossible to determine.
-
-User message: "${message}"
-History: ${historySnippet || "First message."}
-
-JSON only:`;
-}
-
-
-// ─────────────────────────────────────────────────────────────────────────────
-//  SECTION 8 — MYTHOLOGY CARD PICKER
-//  No-consecutive-repeat: filters out the last shown story before picking.
-//  Frontend must pass body.last_story_title from previous meta.mythology_card.card_title.
-// ─────────────────────────────────────────────────────────────────────────────
-
-function pickMythologyCard(pool, show, lastStoryTitle) {
-  if (!show || !Array.isArray(pool) || pool.length === 0) return null;
-  // Exclude the previously shown story so same story never repeats back-to-back
-  const candidates = pool.length > 1
-    ? pool.filter(s => s.card_title !== lastStoryTitle)
-    : pool;
-  const story = candidates[Math.floor(Math.random() * candidates.length)];
-  return {
-    figure:       story.figure,
-    source:       story.source,
-    text:         story.text,
-    card_title:   story.card_title,
-    card_story:   story.card_story,
-    card_connect: story.card_connect,
-    teaching:     story.teaching,
-  };
-}
-
-
-// ─────────────────────────────────────────────────────────────────────────────
-//  SECTION 9 — SYSTEM PROMPT BUILDER
-//
-//  Structure: acknowledge → validate → deepen (MANDATORY) → 1 strong question
-//  No rigid word/sentence counts. Questions drawn from intent-specific bank.
-// ─────────────────────────────────────────────────────────────────────────────
-
-function buildSystemPrompt(intent, mode, psych, isFirstMessage, isRecurring) {
-  // Sample 2 questions from the intent's question bank for the prompt
-  const qBank = (psych && psych.questions) ? psych.questions : [];
-  const shuffled = qBank.slice().sort(() => Math.random() - 0.5);
-  const sampleQs = shuffled.slice(0, 2);
-  const qExamples = sampleQs.length > 0
-    ? "Strong question examples for this intent:\n" + sampleQs.map(q => `  - "${q}"`).join("\n")
-    : "";
-
-  const recurringNote = isRecurring
-    ? "\nPATTERN NOTE: This theme has surfaced multiple times in this conversation. You may gently name that: 'We keep coming back to this — which usually means something here is still unresolved.'"
-    : "";
-
-  if (isFirstMessage) {
-    return `You are Ananda — a thinking partner, not a therapist.
-
-FIRST MESSAGE RULE — overrides everything:
-Write exactly two sentences. No more.
-
-OPENING RULE (applies here too):
-Use ONLY: "Feels like you're..." / "Sounds like you're..." / "Looks like things have been..."
-Do NOT use "Seems like feeling..." — that is grammatically awkward and robotic.
-Do NOT start with "You feel" or "You are".
-
-Sentence 1: Reflect their situation using one of the approved openers + their exact words.
-Sentence 2: Validate simply with a concrete, specific line. No advice, no silver lining, no question.
-
-BAD example: "Seems like feeling stuck at work. That doesn't come from nowhere."
-GOOD example: "Feels like you're stuck in a job that stopped making sense a while ago. That kind of slow drain hits harder than people give it credit for."
-
-STOP after two sentences.`;
-  }
-
-  const modeBlock = {
-
-    reflective: `RESPONSE MODE — REFLECTIVE:
-1. ACKNOWLEDGE: Name what they said plainly. Use "Feels like..." or "Seems like..." + their exact words.
-2. VALIDATE: One sentence that confirms their feeling makes sense given the situation.
-3. INSIGHT: One line that helps them see the situation differently.
-   Use: "Often this happens when..." / "Sometimes the real issue is..." / "What makes this harder is..."
-4. QUESTION: ONE specific question targeting the cause or the decision underneath.
-
-Keep it to 3-4 sentences. Warm. Direct. No advice.`,
-
-    guided: `RESPONSE MODE — GUIDED (your primary mode):
-You are a thinking partner. Feeling heard is the floor, not the ceiling.
-
-MANDATORY STRUCTURE — every response must have all four parts:
-1. ACKNOWLEDGE: Name what they said in plain words. Show you understood the specific situation, not just the emotion.
-2. VALIDATE: One sentence — confirm this makes sense given what they're dealing with.
-3. INSIGHT (MANDATORY — never skip this): 1-2 sentences that shift how they see their situation.
-   Use patterns like:
-   - "Often this happens when..."
-   - "Sometimes the real issue isn't X, it's more about Y..."
-   - "What makes this harder is..."
-   - "It's not always about [surface thing] — often it comes down to [deeper thing]..."
-   This is the most important part. A response without insight is incomplete.
-4. QUESTION (required): ONE strong, specific question. Not generic.
-   Target: the cause, the decision gap, the pattern, or the unnamed thing underneath.
-   Bad: "How does that make you feel?" / "What's happening right now?"
-   Good: specific to THIS person's situation, aimed at clarity or decision-making.
-
-${qExamples}
-
-Response length: 4-6 sentences total. Enough to actually help. Short enough to feel like a real conversation.${recurringNote}`,
-
-    stabilizing: `RESPONSE MODE — STABILIZING:
-The user is overwhelmed. Move slowly. Stay grounded.
-
-MANDATORY STRUCTURE:
-1. ACKNOWLEDGE: Name what they're holding plainly — show you see the weight of it.
-2. VALIDATE: Confirm it makes sense to feel this way.
-3. INSIGHT: Even in stabilizing mode, add one small reframe or observation that lightens the load slightly.
-   Example: "Often when everything feels urgent, it's one thing underneath driving all of it."
-4. QUESTION: ONE small, present-focused question — not about the whole problem, just what's most immediate.
-   Examples: "What feels most urgent right now, if you had to name one thing?" / "What's the one piece of this that's sitting heaviest?"
-
-3-4 sentences. Short. Warm. No advice. No fixing.${recurringNote}`,
-
-  };
-
-  return `You are Ananda — a thinking partner, not a therapist. The wisest, most present friend someone could have at 2am.
-
-Your job is not just to make people feel heard. It is to help them think more clearly about what is actually going on.
-
-YOUR VOICE:
-- Warm but direct. Not clinical. Not cheerful when someone is in pain.
-- Specific to what THIS person said — not generic wellness-speak.
-- Plain English. Like texting a thoughtful friend, not writing a wellness article.
-- Short paragraphs. No bullet points. No headers. No lists in your reply.
-- Vary your sentence structure — never start two consecutive responses the same way.
-
-━━━ MANDATORY RESPONSE COMPLETION RULE ━━━
-Every response (except first message) MUST include all four elements:
-1. Acknowledgment — show you understood the specific situation
-2. Validation — confirm the feeling makes sense
-3. Insight — at least ONE line that helps the user think differently about their situation
-4. Question — one guiding question (required for guided mode, preferred for others)
-
-If your response does not include an insight, it is INCOMPLETE. Do not stop at acknowledgment or validation alone.
-
-━━━ INSIGHT GENERATION RULE ━━━
-Every non-trivial response must include 1 line that reframes or deepens understanding.
-Use patterns like:
-- "Often this happens when..."
-- "Sometimes the real issue isn't [X], it's more about [Y]..."
-- "What makes this harder is..."
-- "It's not always about [surface thing] — often it comes down to [deeper thing]..."
-- "The thing that usually goes unnoticed here is..."
-
-━━━ OPENING RULE ━━━
-When starting a response with a reflection, use ONLY these openers:
-- "Feels like you're..."
-- "Sounds like you're..."
-- "Looks like things have been..."
-
-NEVER use: "Seems like feeling..." (grammatically broken and robotic)
-NEVER use: "You feel..." / "You are..." as an opener
-Keep it conversational — not grammatically perfect.
-
-━━━ GROUNDING RULE ━━━
-Be specific and concrete. Avoid vague filler lines.
-
-BAD (vague): "That doesn't come from nowhere" / "Things feel off" / "Something feels unclear"
-GOOD (concrete): name the actual mechanism — growth, progress, energy, direction, workload, recognition
-
-Examples of concrete insight lines:
-- "That usually happens when growth has stalled for too long."
-- "Often this shows up when the workload keeps increasing but the direction stays unclear."
-- "When energy drops this consistently, it's usually a signal that the work stopped matching the person."
-- "That kind of drain often builds up when there's effort without visible progress."
-- "It's not always about the job itself — often it's the loss of momentum that hurts more."
-
-BANNED PHRASES (never use):
-"That must be hard" / "I understand how you feel" / "You are not alone" / "It's okay" / "That's valid" / "I hear you" / "Must be difficult" / "It sounds like" / "That feeling" / "illuminate" / "navigate" / "profound" / "anchor" / "sit with" / "cultivate" / "hold space" / "journey" (as metaphor) / "transformative" / "resonate" / "paradigm" / "unpack" / "doesn't come from nowhere" / "things feel off"
-
-BANNED OPENERS (never start a sentence with):
-"That sadness" / "That feeling" / "That must" / "It's tough" / "It can be" / "Feeling stuck" / "Being stuck" / "Seems like feeling"
-
-NEVER DO:
-- Stop after acknowledgment or validation — always continue to insight
-- Give direct advice ("you should...", "try...", "have you considered...")
-- Ask more than ONE question per response
-- End with a motivational quote or affirmation
-- Mention being an AI
-- Recommend journaling, meditation, therapy, or apps unless explicitly asked
-- Include mythology or scripture in your reply (handled separately as a card)
-${intent.cultural_context === "indian" ? "- This person is navigating Indian family/social context. Acknowledge the specific weight of expectations, comparison, and 'log kya kahenge' without treating it as generic." : ""}
-
-CURRENT CONTEXT:
-Intent: ${intent.primary_intent}
-Emotion: ${intent.emotion || "unclear"}
-Mode: ${mode}
-
-PSYCHOLOGY GUIDANCE (invisible — shapes approach):
-${psych ? `Approach: ${psych.approach}
-Avoid: ${psych.avoid}
-How to deepen: ${psych.deepen}` : "Follow the structure: acknowledge → validate → insight → question."}
-
-${modeBlock[mode] || modeBlock.guided}`;
-}
-
-
-// ─────────────────────────────────────────────────────────────────────────────
-//  SECTION 10 — MAIN HANDLER
+//  POST HANDLER
 // ─────────────────────────────────────────────────────────────────────────────
 
 export async function POST(req) {
   try {
-    const body    = await req.json();
-    const message = body.message || "";
-    const history = body.history || [];
+    const body = await req.json();
 
-    if (!message || typeof message !== "string" || message.trim().length === 0) {
-      return Response.json({
-        reply: "I am here. Whenever you are ready — say whatever is on your mind.",
-        meta:  { mode: "reflective", severity: "L1", intent: "Out-of-Scope", is_safety: false, mythology_card: null },
-      });
-    }
+    const {
+      message,
+      history = [],
+      user_id,
+      recent_myth_ids = [],
+      recent_myth_chars = [],
+      intent_themes = [],
+    } = body;
 
-    const openai         = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-    const trimmed        = message.trim();
-    const lower          = trimmed.toLowerCase();
-    const isFirstMessage = history.length === 0;
+    const intent = {
+      primary_intent: "Career Confusion",
+      emotion: "uncertain",
+    };
 
-    // ── 1. CRISIS CHECK ───────────────────────────────────────────────────
-    if (CRISIS_KEYWORDS.some(kw => lower.includes(kw))) {
-      return Response.json(SAFETY_RESPONSE);
-    }
+    const mode = "normal";
 
-    // ── 2. VAGUE FIRST MESSAGE ────────────────────────────────────────────
-    if (isFirstMessage && VAGUE_FIRST_MESSAGE_PATTERNS.some(p => p.test(trimmed))) {
-      return Response.json({
-        reply: "I am here, and I am glad you reached out. What has been on your mind?",
-        meta:  { mode: "reflective", severity: "L1", intent: "Out-of-Scope", is_safety: false, mythology_card: null },
-      });
-    }
-
-    // ── 3. OUT OF SCOPE ───────────────────────────────────────────────────
-    if (OUT_OF_SCOPE_TOPICS.some(t => lower.includes(t))) {
-      return Response.json({
-        reply: "That is a little outside what I am built for — I am here for the inner life, not the outer world's logistics. Is there something deeper going on that brought you here today?",
-        meta:  { mode: "reflective", severity: "L1", intent: "Out-of-Scope", is_safety: false, mythology_card: null },
-      });
-    }
-
-    // ── 4. INTENT CLASSIFICATION ──────────────────────────────────────────
-    const historySnippet = history.length > 0
-      ? history.slice(-3).map(m => m.role + ": " + (m.content || "").slice(0, 120)).join(" | ")
-      : "";
-
-    const classifyRes = await openai.chat.completions.create({
-      model:       "gpt-4o-mini",
-      messages:    [{ role: "user", content: buildClassificationPrompt(trimmed, historySnippet) }],
-      temperature: 0.1,
-      max_tokens:  200,
+    const mythCard = await selectMythologyCard({
+      openai,
+      intent: intent.primary_intent,
+      emotion: intent.emotion,
+      show: true,
+      recentIds: recent_myth_ids,
+      recentChars: recent_myth_chars,
+      themes: intent_themes,
     });
 
-    const intent = safeParseIntent(classifyRes.choices[0]?.message?.content || "");
-
-    // Crisis from classifier — safety gate
-    if (intent.primary_intent === "Crisis") {
-      return Response.json(SAFETY_RESPONSE);
-    }
-
-    // ── 5. SEVERITY ESCALATION (capped at L3 — never produces L4) ─────────
-    let level = parseInt((intent.severity || "L2").replace("L", ""), 10);
-    if (isNaN(level) || level < 1) level = 2;
-
-    const isRecurring = detectRecurringPattern(history, intent.primary_intent);
-    if (isRecurring) level = Math.min(level + 1, 3);
-    level = Math.min(level, 3); // hard cap
-    const finalSeverity = "L" + level;
-
-    // ── 6. VAGUE FIRST MESSAGE (post-classification) ──────────────────────
-    if (intent.clarity === "vague" && isFirstMessage) {
-      return Response.json({
-        reply: "I want to make sure I am really with you here. Can you tell me a little more about what has been going on?",
-        meta:  { mode: "reflective", severity: finalSeverity, intent: intent.primary_intent, is_safety: false, mythology_card: null },
-      });
-    }
-
-    // ── 7. MODE SELECTION ─────────────────────────────────────────────────
-    // When user explicitly seeks direction mid-conversation, ensure guided mode
-    const DIRECTION_PATTERNS = [
-      /what should i do/i, /what do i do/i, /then what/i, /what now/i,
-      /how do i/i, /how should i/i, /any (advice|suggestions)/i,
-      /what can i do/i, /help me (figure|decide|choose)/i,
-      /where do i start/i, /what('s| is) (next|the next step)/i,
-    ];
-    const seekingDirection = !isFirstMessage && DIRECTION_PATTERNS.some(p => p.test(trimmed));
-
-    let mode = SEVERITY_MODES[finalSeverity] || "guided";
-    if (seekingDirection && (mode === "reflective" || mode === "stabilizing")) {
-      mode = "guided";
-    }
-
-    // ── 8. MYTHOLOGY CARD ─────────────────────────────────────────────────
-    // Show on every response except stabilizing mode and Out-of-Scope
-    const mythPool = MYTHOLOGY_MAP[intent.primary_intent];
-    const showMyth = (mode !== "stabilizing") && (intent.primary_intent !== "Out-of-Scope");
-    const lastStoryTitle = body.last_story_title || "";
-    const mythCard = pickMythologyCard(mythPool, showMyth, lastStoryTitle);
-
-    // ── 9. RESPONSE GENERATION ────────────────────────────────────────────
-    const psych        = PSYCHOLOGY_MAP[intent.primary_intent];
-    const systemPrompt = buildSystemPrompt(intent, mode, psych, isFirstMessage, isRecurring);
-
-    const completion = await openai.chat.completions.create({
-      model:             "gpt-4o",
+    const chatRes = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
       messages: [
-        { role: "system", content: systemPrompt },
-        ...history.slice(-8).map(m => ({ role: m.role, content: m.content || "" })),
-        { role: "user",   content: trimmed },
+        {
+          role: "system",
+          content: "You are a calm, thoughtful reflection partner. Do not give direct advice. Help the user think.",
+        },
+        ...(history || []),
+        { role: "user", content: message },
       ],
-      temperature:       mode === "stabilizing" ? 0.65 : 0.82,
-      max_tokens:        300,
-      presence_penalty:  0.55,
-      frequency_penalty: 0.45,
+      temperature: 0.7,
     });
 
-    const reply = (completion.choices[0]?.message?.content || "").trim();
+    const reply = chatRes.choices?.[0]?.message?.content || "Hmm… tell me more.";
 
-    // ── 10. RETURN ────────────────────────────────────────────────────────
-    return Response.json({
-      reply,
-      meta: {
-        mode,
-        severity:          finalSeverity,
-        intent:            intent.primary_intent,
-        secondary_intent:  intent.secondary_intent,
-        emotion:           intent.emotion,
-        is_recurring:      isRecurring,
-        seeking_direction: seekingDirection,
-        mythology_card:    mythCard,
-        is_safety:         false,
-      },
-    });
-
+    return new Response(
+      JSON.stringify({
+        reply,
+        meta: {
+          mythology_card: mythCard,
+        },
+      }),
+      { status: 200 }
+    );
   } catch (err) {
-    console.error("[Ananda API Error]", err);
-    return Response.json({
-      reply: "Something got interrupted on my end. I am still here — can you say that again?",
-      meta:  { mode: "reflective", severity: "L1", intent: "Out-of-Scope", is_safety: false, mythology_card: null },
-    });
+    console.error(err);
+    return new Response(
+      JSON.stringify({ error: "Internal Server Error" }),
+      { status: 500 }
+    );
   }
 }
