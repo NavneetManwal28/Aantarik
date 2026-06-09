@@ -1,42 +1,90 @@
 @import "tailwindcss";
 
+/* ═══════════════════════════════════════════════════════════════
+   SOLACE DESIGN SYSTEM
+   Story-first emotional reflection platform
+   ═══════════════════════════════════════════════════════════════ */
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* ── Backgrounds ── */
+  --bg-primary: #faf8f5;        /* Main page background */
+  --bg-secondary: #f3f0ec;      /* Section backgrounds */
+  --bg-elevated: #fcfbf8;       /* Cards, story surfaces */
+  --bg-story: #ffffff;          /* Story reading surface */
+
+  /* ── Text ── */
+  --text-primary: #1c1917;      /* Headings, titles */
+  --text-body: #44403c;         /* Story body, descriptions */
+  --text-secondary: #78716c;    /* Metadata, captions */
+  --text-muted: #a8a29e;        /* Timestamps, placeholders */
+
+  /* ── Borders & Dividers ── */
+  --border-subtle: rgba(28, 25, 23, 0.06);
+  --border-default: rgba(28, 25, 23, 0.1);
+
+  /* ── Shadows ── */
+  --shadow-sm: 0 1px 2px rgba(28, 25, 23, 0.04);
+  --shadow-card: 0 1px 3px rgba(28, 25, 23, 0.06), 0 1px 2px rgba(28, 25, 23, 0.04);
+  --shadow-elevated: 0 4px 12px rgba(28, 25, 23, 0.06), 0 1px 3px rgba(28, 25, 23, 0.04);
+
+  /* ── Emotion Accents (muted, premium) ── */
+  --accent-heavy: #8b7e74;      /* Warm stone */
+  --accent-proving: #b8976e;    /* Warm amber */
+  --accent-starting: #7d9b8a;   /* Sage green */
+  --accent-love: #b07d7d;       /* Dusty rose */
+  --accent-alone: #7d93a8;      /* Slate blue */
+  --accent-noise: #6b8f9e;      /* Teal gray */
+  --accent-identity: #8b82a8;   /* Soft lavender */
+  --accent-grief: #8a8078;      /* Warm gray */
+
+  /* ── CTA ── */
+  --cta-primary: #44695d;       /* Sage green — primary action */
+  --cta-primary-hover: #3a5b50;
+  --cta-text: #ffffff;
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-background: var(--bg-primary);
+  --color-foreground: var(--text-primary);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
+* { scrollbar-width: thin; scrollbar-color: rgba(0,0,0,0.06) transparent; }
+*::-webkit-scrollbar { width: 3px; }
+*::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.06); border-radius: 3px; }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: 'DM Sans', system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
 }
-/* Fade-in animation */
 
+/* ── Animations ── */
 @keyframes fadeIn {
-  from {
-    opacity: 0;
-    transform: translateY(6px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+  from { opacity: 0; transform: translateY(5px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes slideIn {
+  from { opacity: 0; transform: translateX(-6px); }
+  to { opacity: 1; transform: translateX(0); }
 }
 
-.animate-fadeIn {
-  animation: fadeIn 0.4s ease;
+@keyframes storyReveal {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
 }
+
+.animate-fadeIn { animation: fadeIn 0.4s cubic-bezier(0.22, 1, 0.36, 1) both; }
+.animate-slideIn { animation: slideIn 0.35s cubic-bezier(0.22, 1, 0.36, 1) both; }
+.animate-storyReveal { animation: storyReveal 0.35s cubic-bezier(0.22, 1, 0.36, 1) both; }
+
+/* ── Story Typography ── */
+.story-body {
+  font-size: 17px;
+  line-height: 1.95;
+  font-weight: 300;
+  letter-spacing: 0.01em;
+  color: var(--text-body);
+}
+
+::selection { background: rgba(61, 107, 94, 0.12); }
