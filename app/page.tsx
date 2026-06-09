@@ -247,8 +247,7 @@ export default function Home() {
   };
 
   const rec = getStoryForMood(mood, readH);
-  const hour = new Date().getHours();
-  const greeting = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
+  const greeting = "Hello";
   const sortedCols = mood ? (() => { const pri = MOODS.find(m => m.value === mood)?.collections || []; return [...COLLECTIONS].sort((a, b) => { const ai = pri.indexOf(a.id), bi = pri.indexOf(b.id); if (ai !== -1 && bi !== -1) return ai - bi; if (ai !== -1) return -1; if (bi !== -1) return 1; return 0; }); })() : COLLECTIONS;
 
   // ── Mood tint colors for active state ──
@@ -397,7 +396,7 @@ export default function Home() {
                 <div className="hidden md:block"><EyeFollower color="var(--text-muted)" size={50} /></div>
               </div>
 
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-2 flex-1 min-h-0" style={{ gridAutoRows: "1fr" }}>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-2 flex-1 min-h-0 auto-rows-fr">
                 {sortedCols.map((c, i) => (
                   <button key={c.id} onClick={() => openCol(c)}
                     className="animate-fadeIn text-left rounded-2xl p-3 md:p-3.5 flex flex-col cursor-pointer"
@@ -412,8 +411,7 @@ export default function Home() {
                   >
                     <div className="mb-2 shrink-0"><ColIcon id={c.id} size={16} /></div>
                     <p className="text-[11px] font-semibold leading-snug" style={{ color: "var(--text-primary)", letterSpacing: "-0.01em" }}>{c.title}</p>
-                    <p className="text-[9px] mt-0.5 leading-[1.45]" style={{ color: "var(--text-secondary)" }}>{c.subtitle}</p>
-                    <p className="text-[8.5px] mt-auto pt-1.5 italic leading-[1.45]" style={{ color: c.accent, opacity: 0.65, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" as const, overflow: "hidden" }}>{c.intro.split(".")[0]}.</p>
+                    <p className="text-[9px] mt-1" style={{ color: "var(--text-secondary)" }}>{c.subtitle}</p>
                   </button>
                 ))}
               </div>
